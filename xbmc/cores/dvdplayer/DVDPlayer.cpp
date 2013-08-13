@@ -106,6 +106,7 @@
 #include "Client/PlexMediaServerClient.h"
 #include "ApplicationMessenger.h"
 #include "Client/PlexTranscoderClient.h"
+#include <Network/NetworkInterface.h>
 /* END PLEX */
 
 using namespace std;
