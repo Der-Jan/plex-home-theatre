@@ -1,7 +1,7 @@
 # vim: setlocal syntax=cmake:
 
 ######################### Compiler CFLAGS
-set(EXTRA_CFLAGS "-fPIC -DPIC")
+set(EXTRA_CFLAGS "-fPIC -DPIC -msse2 -mssse3 -mmovbe -march=atom -m64")
 
 ######################### CHECK LIBRARIES / FRAMEWORKS
 if(UNIX)
