@@ -35,6 +35,7 @@ set(LINK_PKG
   LibDl
   LibRt
 )
+set(USE_OMXLIB 1)
 
 foreach(l ${LINK_PKG})
   plex_find_package(${l} 1 1)
@@ -133,4 +134,4 @@ set(PLEX_LINK_WHOLEARCHIVE -Wl,--whole-archive)
 set(PLEX_LINK_NOWHOLEARCHIVE -Wl,--no-whole-archive)
 
 ############ Add our definitions
-add_definitions(-DTARGET_LINUX -D_LINUX)
+add_definitions(-DTARGET_LINUX -D_LINUX -DHAVE_OMXLIB -DOMX_SKIP64BIT -DHAS_OMXPLAYER)
