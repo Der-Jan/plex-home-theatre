@@ -161,7 +161,7 @@ if(ENABLE_PYTHON)
 endif()
 
 if(NOT DEFINED PLEX_SPLASH)
-  if(TARGET_RPI)
+  if(TARGET_LINUX)
     set(PLEX_SPLASH Splash-RPI.png)
   else(TARGET_RPI)
     set(PLEX_SPLASH Splash.png)
