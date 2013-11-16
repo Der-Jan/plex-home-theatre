@@ -84,6 +84,8 @@ plex_find_package(Alsa 0 1)
 plex_find_package(LibUSB 0 1)
 plex_find_package(LibUDEV 0 1)
 
+plex_find_library(python2.7 0 1 ${RPI_EXTERNAL_PYTHON_HOME}/lib 1)
+
 if(ENABLE_DVD_DRIVE)
   plex_find_package(CDIO 1 1)
 endif(ENABLE_DVD_DRIVE)
