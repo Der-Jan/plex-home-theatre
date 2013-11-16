@@ -84,7 +84,6 @@ plex_find_package(Alsa 0 1)
 plex_find_package(LibUSB 0 1)
 plex_find_package(LibUDEV 0 1)
 
-plex_find_library(python2.7 0 1 ${RPI_EXTERNAL_PYTHON_HOME}/lib 1)
 
 if(ENABLE_DVD_DRIVE)
   plex_find_package(CDIO 1 1)
@@ -124,6 +123,16 @@ if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
 else()
   set(ARCH "i486-linux")
 endif()
+
+plex_find_library(dbus-1 0 0  system/usr/lib 1)
+
+
+plex_find_library(python2.7 0 1 ${RPI_EXTERNAL_PYTHON_HOME}/lib 1)
+
+#needed for the commandline flag CMAKE_INCLUDE_PATH
+foreach(path ${CMAKE_INCLUDE_PATH})
+    include_directories(${path})
+endforeach()
 
 set(LIBPATH bin)
 set(BINPATH bin)
