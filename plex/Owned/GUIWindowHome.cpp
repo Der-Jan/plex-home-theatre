@@ -42,12 +42,9 @@
 #include "MediaSource.h"
 #include "AlarmClock.h"
 #include "Key.h"
-#include "GUILargeTextureManager.h"
 
-#include "MyPlexManager.h"
+#include "Client/MyPlex/MyPlexManager.h"
 #include "PlexDirectory.h"
-#include "PlexSourceScanner.h"
-#include "PlexLibrarySectionManager.h"
 #include "threads/SingleLock.h"
 #include "PlexUtils.h"
 #include "video/VideoInfoTag.h"
@@ -57,11 +54,10 @@
 #include "dialogs/GUIDialogVideoInfo.h"
 #include "dialogs/GUIDialogOK.h"
 
-#include "plex/PlexMediaServerQueue.h"
+#include "Client/PlexMediaServerClient.h"
 
 #include "powermanagement/PowerManager.h"
 
-#include "Application.h" // needed for rasplex only
 #include "ApplicationMessenger.h"
 
 #include "AdvancedSettings.h"
@@ -69,7 +65,21 @@
 #include "Job.h"
 #include "JobManager.h"
 
-#include "BackgroundMusicPlayer.h"
+#include "interfaces/Builtins.h"
+
+#include "Client/PlexServerManager.h"
+#include "Client/PlexServerDataLoader.h"
+#include "PlexJobs.h"
+#include "PlexApplication.h"
+
+#include "ApplicationMessenger.h"
+
+#include "AutoUpdate/PlexAutoUpdate.h"
+
+#include "PlexThemeMusicPlayer.h"
+#include "dialogs/GUIDialogBusy.h"
+#include "DirectoryCache.h"
+#include "GUI/GUIPlexMediaWindow.h"
 
 using namespace std;
 using namespace XFILE;
@@ -90,144 +100,90 @@ using namespace boost;
 
 #define SLIDESHOW_MULTIIMAGE 10101
 
+typedef std::pair<CStdString, CPlexSectionFanout*> nameSectionPair;
 
 //////////////////////////////////////////////////////////////////////////////
-CPlexSectionFanout::CPlexSectionFanout(const CStdString &url, int sectionType)
-  : m_url(url), m_sectionType(sectionType)
+CPlexSectionFanout::CPlexSectionFanout(const CStdString &url, SectionTypes sectionType)
+  : m_sectionType(sectionType), m_needsRefresh(false), m_url(url)
 {
   Refresh();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-CFileItemListPtr CPlexSectionFanout::GetContentList(int type)
+void CPlexSectionFanout::GetContentList(int type, CFileItemList& list)
 {
   CSingleLock lk(m_critical);
-  return m_fileLists[type];
+  if (m_fileLists.find(type) != m_fileLists.end())
+    list.Assign(*m_fileLists[type], false);
 }
 
 //////////////////////////////////////////////////////////////////////////////
-std::vector<contentListPair> CPlexSectionFanout::GetContentLists()
+void CPlexSectionFanout::GetContentTypes(std::vector<int> &lists)
 {
   CSingleLock lk(m_critical);
-  std::vector<contentListPair> ret;
   BOOST_FOREACH(contentListPair p, m_fileLists)
-    ret.push_back(p);
-
-  return ret;
+    lists.push_back(p.first);
 }
 
 //////////////////////////////////////////////////////////////////////////////
-CStdString CPlexSectionFanout::GetContent(const CStdString& url)
+int CPlexSectionFanout::LoadSection(const CURL &url, int contentType)
 {
-	CURL check_url(url);
-	bool bReload = true;
-
-	m_http.UseOldHttpVersion(true);
-	m_http.SetTimeout(1000);
-
-	CStdString Answer;
-
-	m_http.Get(check_url.Get(), Answer);
-
-	return Answer;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-int CPlexSectionFanout::LoadSection(const CStdString& url, int contentType)
-{
-	std::map<CStdString,CStdString>::iterator it;
-
-	CStdString Content = GetContent(url);
-	it = m_UrlCache.find(url);
-
-	if (it!=m_UrlCache.end())
-		it->second = Content;
-	else
-		m_UrlCache.insert( std::pair<CStdString,CStdString>(url,Content));
-
-	CPlexSectionLoadJob* job = new CPlexSectionLoadJob(url, contentType);
-	return CJobManager::GetInstance().AddJob(job, this, CJob::PRIORITY_HIGH);
+  CPlexSectionFetchJob* job = new CPlexSectionFetchJob(url, contentType);
+  return CJobManager::GetInstance().AddJob(job, this, CJob::PRIORITY_HIGH);
 }
 
 //////////////////////////////////////////////////////////////////////////////
 CStdString CPlexSectionFanout::GetBestServerUrl(const CStdString& extraUrl)
 {
-  CStdString bestServerUrl;
-  PlexServerPtr server = PlexServerManager::Get().bestServer();
+  CPlexServerPtr server = g_plexApplication.serverManager->GetBestServer();
   if (server)
-  {
-    if (!extraUrl.empty())
-      bestServerUrl = PlexUtils::AppendPathToURL(server->url(), extraUrl);
-    else
-      bestServerUrl = server->url();
+    return server->BuildPlexURL(extraUrl).Get();
 
-    if (!server->token.empty())
-    {
-      CURL urlWithToken(bestServerUrl);
-      urlWithToken.SetOption("X-Plex-Token", server->token);
-      return urlWithToken.Get();
-    }
-
-    return bestServerUrl;
-  }
-
-  bestServerUrl = "http://127.0.0.1:32400/";
-  if (!extraUrl.empty())
-    bestServerUrl = PlexUtils::AppendPathToURL(bestServerUrl, extraUrl);
-
-  return bestServerUrl;
+  CPlexServerPtr local = g_plexApplication.serverManager->FindByUUID("local");
+  return local->BuildPlexURL(extraUrl).Get();
 }
-
-//////////////////////////////////////////////////////////////////////////////
-void CPlexSectionFanout::CancelJobs()
-{
-    BOOST_FOREACH(int PrevJob,m_outstandingJobs)
-    {
-    	CLog::Log(LOGNOTICE,"Canceling Job %d",PrevJob);
-    	CJobManager::GetInstance().CancelJob(PrevJob);
-    }
-    m_outstandingJobs.clear();
-}
-
 
 //////////////////////////////////////////////////////////////////////////////
 void CPlexSectionFanout::Refresh()
 {
-  CPlexDirectory dir(true, false);
+  CPlexDirectory dir;
 
   CSingleLock lk(m_critical);
+  
+  BOOST_FOREACH(contentListPair p, m_fileLists)
+    delete p.second;
+  
   m_fileLists.clear();
 
-  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:Refresh for %s", m_url.c_str());
+  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:Refresh for %s", m_url.Get().c_str());
 
   CURL trueUrl(m_url);
 
-  if (trueUrl.GetProtocol() == "channel")
-  {
-    if (!g_advancedSettings.m_bHideFanouts)
-    {
-      CStdString filter = "channels/recentlyViewed?filter=" + trueUrl.GetHostName();
-      LoadSection(GetBestServerUrl(filter), CONTENT_LIST_RECENTLY_ACCESSED);
-    }
-
-    /* We always show this as fanart */
-    LoadSection(GetBestServerUrl("channels/arts"), CONTENT_LIST_FANART);
-  }
-  else if (trueUrl.GetProtocol() == "global")
+  if (trueUrl.GetProtocol() == "global")
   {
     if (g_guiSettings.GetBool("lookandfeel.enableglobalslideshow"))
       LoadSection(GetBestServerUrl("library/arts"), CONTENT_LIST_FANART);
   }
-  else if (m_sectionType == PLEX_METADATA_MIXED)
+  else if (m_sectionType == SECTION_TYPE_QUEUE)
   {
     if (!g_advancedSettings.m_bHideFanouts)
     {
-      if (m_url.Find("queue") != -1)
-        LoadSection(MyPlexManager::Get().getPlaylistUrl("/queue/unwatched"), CONTENT_LIST_QUEUE);
-      else if (m_url.Find("recommendations") != -1)
-        LoadSection(MyPlexManager::Get().getPlaylistUrl("/recommendations/unwatched"), CONTENT_LIST_QUEUE);
+      PlexUtils::AppendPathToURL(trueUrl, "queue/unwatched");
+      m_outstandingJobs.push_back(LoadSection(trueUrl, CONTENT_LIST_QUEUE));
+      trueUrl = CURL(m_url);
+      PlexUtils::AppendPathToURL(trueUrl, "recommendations/unwatched");
+      m_outstandingJobs.push_back(LoadSection(trueUrl, CONTENT_LIST_RECOMMENDATIONS));
     }
   }
+  else if (m_sectionType == SECTION_TYPE_CHANNELS)
+  {
+    if (!g_advancedSettings.m_bHideFanouts)
+      m_outstandingJobs.push_back(LoadSection(GetBestServerUrl("channels/recentlyViewed"), CONTENT_LIST_RECENTLY_ACCESSED));
+
+    /* We always show this as fanart */
+    m_outstandingJobs.push_back(LoadSection(GetBestServerUrl("channels/arts"), CONTENT_LIST_FANART));
+  }
+
   else
   {
     if (!g_advancedSettings.m_bHideFanouts)
@@ -235,54 +191,72 @@ void CPlexSectionFanout::Refresh()
       /* On slow/limited systems we don't want to have the full list */
 #if defined(TARGET_RPI) || defined(TARGET_DARWIN_IOS)
       trueUrl.SetOption("X-Plex-Container-Start", "0");
-      trueUrl.SetOption("X-Plex-Container-Size", "10");
+      trueUrl.SetOption("X-Plex-Container-Size", "20");
 #endif
       
-      trueUrl.SetOption("unwatched", "1");
-      trueUrl.SetFileName(PlexUtils::AppendPathToURL(trueUrl.GetFileName(), "recentlyAdded"));
+      if (m_sectionType != SECTION_TYPE_ALBUM)
+        trueUrl.SetOption("unwatched", "1");
+      
+#if 0
+      if (m_sectionType == SECTION_TYPE_SHOW)
+      {
+        trueUrl.SetOption("stack", "1");
+        trueUrl.SetOption("includeParentData", "1");
+      }
+#endif
+
+      PlexUtils::AppendPathToURL(trueUrl, "recentlyAdded");
       
       m_outstandingJobs.push_back(LoadSection(trueUrl.Get(), CONTENT_LIST_RECENTLY_ADDED));
 
-      if (m_sectionType == PLEX_METADATA_MOVIE || m_sectionType == PLEX_METADATA_SHOW)
+      if (m_sectionType == SECTION_TYPE_MOVIE || m_sectionType == SECTION_TYPE_SHOW ||
+          m_sectionType == SECTION_TYPE_HOME_MOVIE)
       {
         trueUrl = CURL(m_url);
-        trueUrl.SetFileName(PlexUtils::AppendPathToURL(trueUrl.GetFileName(), "onDeck"));
+        PlexUtils::AppendPathToURL(trueUrl, "onDeck");
         m_outstandingJobs.push_back(LoadSection(trueUrl.Get(), CONTENT_LIST_ON_DECK));
       }
     }
 
     /* We don't want to wait on the fanart, so don't add it to the outstandingjobs map */
     if (g_guiSettings.GetBool("lookandfeel.enableglobalslideshow"))
-      LoadSection(PlexUtils::AppendPathToURL(m_url, "arts"), CONTENT_LIST_FANART);
+    {
+      CURL artsUrl(m_url);
+      PlexUtils::AppendPathToURL(artsUrl, "arts");
+      LoadSection(artsUrl, CONTENT_LIST_FANART);
+    }
   }
 }
 
 //////////////////////////////////////////////////////////////////////////////
 void CPlexSectionFanout::OnJobComplete(unsigned int jobID, bool success, CJob *job)
 {
-  CPlexSectionLoadJob *load = (CPlexSectionLoadJob*)job;
+  CPlexSectionFetchJob *load = (CPlexSectionFetchJob*)job;
   if (success)
   {
-    m_fileLists[load->GetContentType()] = load->GetFileItemList();
+    CSingleLock lk(m_critical);
+    int type = load->m_contentType;
+    if (m_fileLists.find(type) != m_fileLists.end() && m_fileLists[type] != NULL)
+      delete m_fileLists[type];
+    
+    CFileItemList* newList = new CFileItemList;
+    newList->Assign(load->m_items, false);
+
+    /* HACK HACK HACK */
+    if (m_sectionType == SECTION_TYPE_HOME_MOVIE)
+    {
+      for (int i = 0; i < newList->Size(); i ++)
+      {
+        newList->Get(i)->SetProperty("type", "clip");
+        newList->Get(i)->SetPlexDirectoryType(PLEX_DIR_TYPE_CLIP);
+      }
+    }
+
+    m_fileLists[type] = newList;
     
     /* Pre-cache stuff */
-	if (load->GetContentType() != CONTENT_LIST_FANART)
-	m_videoThumb.Load(*m_fileLists[load->GetContentType()].get());
-
-#if defined(TARGET_RPI)
-	// On RPi, we want to preload the images for fanouts as it takes time
-	// therefore we will Queue them to the LargeTextureManager
-    CFileItemPtr it;
-    for (int i=0;i<m_fileLists[load->GetContentType()]->Size();i++)
-    {
-    	it = m_fileLists[load->GetContentType()]->Get(i);
-    	if (it->HasArt("thumb"))
-    	{
-    		CLog::Log(LOGDEBUG,"Queueing %s ",it->GetArt("thumb").c_str());
-    		g_largeTextureManager.QueueImage(it->GetArt("thumb"));
-    	}
-    }
-#endif
+    if (type != CONTENT_LIST_FANART)
+      g_plexApplication.thumbCacher->Load(*newList);
   }
 
   m_age.restart();
@@ -291,16 +265,16 @@ void CPlexSectionFanout::OnJobComplete(unsigned int jobID, bool success, CJob *j
   if (it != m_outstandingJobs.end())
     m_outstandingJobs.erase(it);
 
-  if (m_outstandingJobs.size() == 0 && load->GetContentType() != CONTENT_LIST_FANART)
+  if (m_outstandingJobs.size() == 0 && load->m_contentType != CONTENT_LIST_FANART)
   {
     CGUIMessage msg(GUI_MSG_PLEX_SECTION_LOADED, WINDOW_HOME, 300, m_sectionType);
-    msg.SetStringParam(m_url);
+    msg.SetStringParam(m_url.Get());
     g_windowManager.SendThreadMessage(msg);
   }
-  else if (load->GetContentType() == CONTENT_LIST_FANART)
+  else if (load->m_contentType == CONTENT_LIST_FANART)
   {
     CGUIMessage msg(GUI_MSG_PLEX_SECTION_LOADED, WINDOW_HOME, 300, CONTENT_LIST_FANART);
-    msg.SetStringParam(m_url);
+    msg.SetStringParam(m_url.Get());
     g_windowManager.SendThreadMessage(msg);
   }
 }
@@ -314,11 +288,11 @@ void CPlexSectionFanout::Show()
   {
     /* we are up to date, just send the messages */
     CGUIMessage msg(GUI_MSG_PLEX_SECTION_LOADED, WINDOW_HOME, 300, m_sectionType);
-    msg.SetStringParam(m_url);
+    msg.SetStringParam(m_url.Get());
     g_windowManager.SendThreadMessage(msg);
 
     CGUIMessage msg2(GUI_MSG_PLEX_SECTION_LOADED, WINDOW_HOME, 300, CONTENT_LIST_FANART);
-    msg2.SetStringParam(m_url);
+    msg2.SetStringParam(m_url.Get());
     g_windowManager.SendThreadMessage(msg2);
   }
 }
@@ -326,58 +300,29 @@ void CPlexSectionFanout::Show()
 //////////////////////////////////////////////////////////////////////////////
 bool CPlexSectionFanout::NeedsRefresh()
 {
-
-  bool isPlaying = g_application.IsPlayingVideo(); 
-  int scaleFactor = 1; // for desktop
-
-#if (defined(TARGET_RPI))
-  // On RPI check if content has changed, based on PMS answer
-  CStdString Content;
-  for (std::map<CStdString,CStdString>::iterator it = m_UrlCache.begin();it!=m_UrlCache.end();++it)
+  if (m_needsRefresh)
   {
-	  Content = GetContent(it->first);
-	  if (it->second != Content)
-	  {
-		  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:NeedsRefresh is Needed.");
-		  return true;
-	  }
+    m_needsRefresh = false;
+    return true;
   }
+  
+  int refreshTime = 5;
+  if (m_sectionType == SECTION_TYPE_ALBUM ||
+      m_sectionType == SECTION_TYPE_QUEUE ||
+      m_sectionType >= SECTION_TYPE_CHANNELS)
+    refreshTime = 20;
 
-  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:NeedsRefresh is NOT Needed.");
+  if (m_sectionType == SECTION_TYPE_GLOBAL_FANART)
+    refreshTime = 3600;
 
-  return false;
-#endif
-
-  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:NeedsRefresh is playing: %s", isPlaying ?  "true" : "false");
-
-  if ( isPlaying ) // bail out if playing on raspberry pi
-      return false;
-
-  scaleFactor = 1; // only on rpi
-
-  int refreshTime = 5 * scaleFactor;
-  if (m_sectionType == PLEX_METADATA_ALBUM ||
-      m_sectionType == PLEX_METADATA_MIXED ||
-      (m_sectionType >= PLEX_METADATA_CHANNEL_VIDEO &&
-       m_sectionType <= PLEX_METADATA_CHANNEL_APPLICATION))
-    refreshTime = 20 * scaleFactor;
-
-  if (m_sectionType == PLEX_METADATA_GLOBAL_IMAGES)
-    refreshTime = 100 * scaleFactor;
-
-  CLog::Log(LOGDEBUG, "GUIWindowHome:SectionFanout:NeedsRefresh %s, age %f, refresh %s", m_url.c_str(), m_age.elapsed(), m_age.elapsed() > refreshTime ? "yes" : "no");
   return m_age.elapsed() > refreshTime;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 CGUIWindowHome::CGUIWindowHome(void) : CGUIWindow(WINDOW_HOME, "Home.xml"), m_globalArt(false), m_lastSelectedItem("Search")
 {
-  if (g_advancedSettings.m_iShowFirstRun != 77)
-  {
-    m_auxLoadingThread = new CAuxFanLoadThread();
-    m_auxLoadingThread->Create();
-  }
-  AddSection("global://art", PLEX_METADATA_GLOBAL_IMAGES);
+  m_loadType = LOAD_ON_GUI_INIT;
+  AddSection("global://art/", SECTION_TYPE_GLOBAL_FANART);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -407,8 +352,36 @@ bool CGUIWindowHome::OnAction(const CAction &action)
   
   bool ret = CGUIWindow::OnAction(action);
   
+  int focusedControl = GetFocusedControlID();
+
   // See what's focused.
-  if (GetFocusedControl() && GetFocusedControl()->GetID() == MAIN_MENU)
+  if (focusedControl == MAIN_MENU)
+  {
+    CFileItemPtr pItem = GetCurrentListItem();
+    if (pItem)
+    {
+      CLog::Log(LOGDEBUG, "CGUIWindowHome::OnAction %s=>%s", pItem->GetLabel().c_str(), pItem->GetProperty("sectionPath").asString().c_str());
+      if (m_lastSelectedItem != GetCurrentItemName())
+      {
+        HideAllLists();
+        m_lastSelectedItem = GetCurrentItemName();
+        m_lastSelectedSubItem.Empty();
+        g_plexApplication.timer.SetTimeout(200, this);
+      }
+
+      if (action.GetID() == ACTION_SELECT_ITEM && pItem->HasProperty("sectionPath") &&
+          !pItem->GetProperty("navigateDirectly").asBoolean())
+      {
+        OpenItem(pItem);
+        return true;
+      }
+    }
+  }
+  else if (focusedControl == CONTENT_LIST_ON_DECK ||
+           focusedControl == CONTENT_LIST_RECENTLY_ADDED ||
+           focusedControl == CONTENT_LIST_QUEUE ||
+           focusedControl == CONTENT_LIST_RECOMMENDATIONS ||
+           focusedControl == CONTENT_LIST_RECENTLY_ACCESSED)
   {
     CGUIBaseContainer* pControl = (CGUIBaseContainer*)GetFocusedControl();
     if (pControl)
@@ -416,24 +389,11 @@ bool CGUIWindowHome::OnAction(const CAction &action)
       CGUIListItemPtr pItem = pControl->GetListItem(0);
       if (pItem)
       {
-
-    	#if defined(TARGET_RPI)
-    	// In order to avoid to spawn to many jobs on RPi when scrolling quickly
-    	// between the menu items, we eventually cancel the current item Jobs if they
-    	// are not yet completed
-        if (m_sections.find(m_lastSelectedItem)!= m_sections.end())
-      	  	  m_sections[m_lastSelectedItem]->CancelJobs();
-		#endif
-
-        m_lastSelectedItem = GetCurrentItemName();
-        if (!ShowSection(pItem->GetProperty("sectionPath").asString()) && !m_globalArt)
-        {
-          HideAllLists();
-          ShowSection("global://art");
-        }
+        m_lastSelectedSubItem = pItem->GetProperty("key").asString();
       }
     }
   }
+
   
   return ret;
 }
@@ -443,7 +403,12 @@ CFileItemPtr CGUIWindowHome::GetCurrentListItem(int offset)
 {
   CGUIBaseContainer* pControl = (CGUIBaseContainer* )GetControl(MAIN_MENU);
   if (pControl)
-    return boost::static_pointer_cast<CFileItem>(pControl->GetListItem(offset));
+  {
+    CGUIListItemPtr guiItem = pControl->GetListItem(offset);
+    if (guiItem && guiItem->IsFileItem())
+      return boost::static_pointer_cast<CFileItem>(guiItem);
+  }
+
   return CFileItemPtr();
 }
 
@@ -495,15 +460,9 @@ bool CGUIWindowHome::OnPopupMenu()
     CGUIListItemPtr item = container->GetListItem(0);
     if (item->IsFileItem())
     {
-      bool updateFanOut = false;
       CFileItemPtr fileItem = boost::static_pointer_cast<CFileItem>(item);
       CContextButtons buttons;
-      int type = (int)fileItem->GetProperty("typeNumber").asInteger();
-
-      if (type == PLEX_METADATA_EPISODE)
-        buttons.Add(CONTEXT_BUTTON_INFO, 20352);
-      else if (type == PLEX_METADATA_MOVIE)
-        buttons.Add(CONTEXT_BUTTON_INFO, 13346);
+      EPlexDirectoryType type = (EPlexDirectoryType)fileItem->GetPlexDirectoryType();
 
       if (((fileItem->IsRemoteSharedPlexMediaServerLibrary() == false) &&
           (fileItem->GetProperty("HasWatchedState").asBoolean() == true)) ||
@@ -517,39 +476,64 @@ bool CGUIWindowHome::OnPopupMenu()
           buttons.Add(CONTEXT_BUTTON_MARK_WATCHED, 16103);
       }
 
+      CPlexServerPtr server = g_plexApplication.serverManager->FindByUUID(fileItem->GetProperty("plexserver").asString());
+      if (server && server->SupportsDeletion())
+        buttons.Add(CONTEXT_BUTTON_DELETE, 15015);
+
       int choice = CGUIDialogContextMenu::ShowAndGetChoice(buttons);
 
-      if (choice == CONTEXT_BUTTON_INFO)
+      if (choice == CONTEXT_BUTTON_MARK_UNWATCHED)
       {
-        CGUIDialogVideoInfo* pDlgInfo = (CGUIDialogVideoInfo*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_INFO);
-
-        if (!pDlgInfo) return false;
-
-        pDlgInfo->SetMovie(fileItem);
-        pDlgInfo->DoModal();
-
-        if (pDlgInfo->NeedRefresh() == false)
-          return false;
-
-        return true;
-      }
-      else if (choice == CONTEXT_BUTTON_MARK_UNWATCHED)
-      {
-        fileItem->MarkAsUnWatched();
-        updateFanOut = true;
+        bool sendMsg = false;
+        if (controlId == CONTENT_LIST_ON_DECK && fileItem->GetPlexDirectoryType() == PLEX_DIR_TYPE_MOVIE)
+        {
+          std::vector<CGUIListItemPtr> items = container->GetItems();
+          int idx = std::distance(items.begin(), std::find(items.begin(), items.end(), fileItem));
+          CGUIMessage msg(GUI_MSG_LIST_REMOVE_ITEM, GetID(), controlId, idx+1, 0);
+          OnMessage(msg);
+        }
+        else if (controlId == CONTENT_LIST_ON_DECK && fileItem->GetPlexDirectoryType() == PLEX_DIR_TYPE_EPISODE)
+        {
+          SectionNeedsRefresh(GetCurrentItemName());
+          sendMsg = true;
+        }
+        fileItem->MarkAsUnWatched(sendMsg);
       }
       else if (choice == CONTEXT_BUTTON_MARK_WATCHED)
       {
-        fileItem->MarkAsWatched();
-        updateFanOut = true;
-      }
+        bool sendMsg = false;
+        if (controlId == CONTENT_LIST_RECENTLY_ADDED ||
+            (controlId == CONTENT_LIST_ON_DECK && fileItem->GetPlexDirectoryType() == PLEX_DIR_TYPE_MOVIE))
+        {
+          /* marking as watched and is on the on deck list, we need to remove it then */
+          std::vector<CGUIListItemPtr> items = container->GetItems();
+          int idx = std::distance(items.begin(), std::find(items.begin(), items.end(), fileItem));
+          CGUIMessage msg(GUI_MSG_LIST_REMOVE_ITEM, GetID(), controlId, idx+1, 0);
+          OnMessage(msg);
+        }
+        else if (controlId == CONTENT_LIST_ON_DECK && fileItem->GetPlexDirectoryType() == PLEX_DIR_TYPE_EPISODE)
+        {
+          SectionNeedsRefresh(GetCurrentItemName());
+          sendMsg = true;
+        }
 
-      if (updateFanOut)
+        fileItem->MarkAsWatched(sendMsg);
+      }
+      else if (choice == CONTEXT_BUTTON_DELETE)
       {
-        CFileItemPtr item = GetCurrentListItem();
-        RefreshSection(item->GetProperty("sectionPath").asString(), item->GetProperty("typeNumber").asInteger());
-      }
+        // Confirm.
+        if (!CGUIDialogYesNo::ShowAndGetInput(750, 125, 0, 0))
+          return true;
 
+        g_plexApplication.mediaServerClient->deleteItem(fileItem);
+
+        /* marking as watched and is on the on deck list, we need to remove it then */
+        std::vector<CGUIListItemPtr> items = container->GetItems();
+        int idx = std::distance(items.begin(), std::find(items.begin(), items.end(), fileItem));
+        CGUIMessage msg(GUI_MSG_LIST_REMOVE_ITEM, GetID(), controlId, idx+1, 0);
+        OnMessage(msg);
+      }
+      return true;
     }
   }
   return false;
@@ -575,8 +559,6 @@ bool CGUIWindowHome::CheckTimer(const CStdString& strExisting, const CStdString&
     return true;
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-typedef pair<string, HostSourcesPtr> string_sources_pair;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIWindowHome::OnMessage(CGUIMessage& message)
@@ -594,24 +576,36 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
   {
     case GUI_MSG_WINDOW_INIT:
     {
-      if (!m_lastSelectedItem.empty())
-        HideAllLists();
-
-      if (m_lastSelectedItem == "Search")
-        RefreshSection("global://art", PLEX_METADATA_GLOBAL_IMAGES);
-
-      if (g_guiSettings.GetBool("backgroundmusic.bgmusicenabled"))
-        g_backgroundMusicPlayer.PlayElevatorMusic();
-
-    }
-
-    case GUI_MSG_WINDOW_RESET:
-    case GUI_MSG_UPDATE_MAIN_MENU:
-    {
       UpdateSections();
 
-      if (message.GetMessage() != GUI_MSG_UPDATE_MAIN_MENU)
+      RestoreSection();
+
+      if (m_lastSelectedItem == "Search")
+        RefreshSection("global://art/", SECTION_TYPE_GLOBAL_FANART);
+      
+      RefreshAllSections(false);
+      g_plexApplication.themeMusicPlayer->playForItem(CFileItem());
+      
+      break;
+    }
+
+    case GUI_MSG_PLEX_BEST_SERVER_UPDATED:
+    {
+      RefreshAllSections(true);
+      break;
+    }
+      
+    case GUI_MSG_WINDOW_RESET:
+    case GUI_MSG_PLEX_SERVER_DATA_LOADED:
+    case GUI_MSG_PLEX_SERVER_DATA_UNLOADED:
+    case GUI_MSG_UPDATE:
+    {
+      UpdateSections();
+      
+      if (message.GetMessage() == GUI_MSG_WINDOW_RESET || message.GetMessage() == GUI_MSG_UPDATE)
         RefreshAllSections(false);
+      else if (message.GetMessage() == GUI_MSG_PLEX_SERVER_DATA_LOADED)
+        RefreshSectionsForServer(message.GetStringParam());
     }
       break;
 
@@ -621,8 +615,6 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
       CStdString url = message.GetStringParam();
       CFileItem* currentFileItem = GetCurrentFileItem();
 
-      CLog::Log(LOGDEBUG, "GUIWindowHome:OnMessage Plex Section loaded %s %d", url.c_str(), type);
-
       CStdString sectionToLoad;
       if (currentFileItem && currentFileItem->HasProperty("sectionPath"))
         sectionToLoad = currentFileItem->GetProperty("sectionPath").asString();
@@ -631,17 +623,20 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
 
       if (type == CONTENT_LIST_FANART)
       {
-        if (url == sectionToLoad || url == "global://art")
+        if (url != m_currentFanArt && (url == sectionToLoad || url == "global://art/"))
         {
-          CFileItemListPtr list = GetContentListFromSection(url, CONTENT_LIST_FANART);
-          if (list)
+          CFileItemList list;
+          if (GetContentListFromSection(url, CONTENT_LIST_FANART, list))
           {
             SET_CONTROL_VISIBLE(SLIDESHOW_MULTIIMAGE);
 
-            CLog::Log(LOGDEBUG, "GUIWindowHome:OnMessage activating global fanart with %d photos", list->Size());
-            CGUIMessage msg(GUI_MSG_LABEL_BIND, GetID(), SLIDESHOW_MULTIIMAGE, 0, 0, list.get());
+            CLog::Log(LOGDEBUG, "GUIWindowHome:OnMessage activating global fanart with %d photos", list.Size());
+            CGUIMessage msg(GUI_MSG_LABEL_BIND, GetID(), SLIDESHOW_MULTIIMAGE, 0, 0, &list);
             OnMessage(msg);
+            m_currentFanArt = url;
           }
+          else
+            CLog::Log(LOGDEBUG, "CGUIWindowHome::OnMessage GetContentListFromSection returned empty list");
         }
       }
       else
@@ -650,16 +645,34 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
         {
           HideAllLists();
 
-          BOOST_FOREACH(contentListPair p, GetContentListsFromSection(url))
+          std::vector<int> types;
+          if (GetContentTypesFromSection(url, types))
           {
-            if(p.second && p.second->Size() > 0)
+            BOOST_FOREACH(int p, types)
             {
-              CGUIMessage msg(GUI_MSG_LABEL_BIND, GetID(), p.first, 0, 0, p.second.get());
-              OnMessage(msg);
-              SET_CONTROL_VISIBLE(p.first);
+              CFileItemList list;
+              GetContentListFromSection(url, p, list);
+              if(list.Size() > 0)
+              {
+                int selectedItem = 0;
+                if (!m_lastSelectedSubItem.empty())
+                {
+                  for (int i = 0; i < list.Size(); i ++)
+                  {
+                    if (list.Get(i)->GetPath() == m_lastSelectedSubItem)
+                    {
+                      selectedItem = i;
+                    }
+                  }
+                }
+
+                CGUIMessage msg(GUI_MSG_LABEL_BIND, GetID(), p, selectedItem, 0, &list);
+                OnMessage(msg);
+                SET_CONTROL_VISIBLE(p);
+              }
+              else
+                SET_CONTROL_HIDDEN(p);
             }
-            else
-              SET_CONTROL_HIDDEN(p.first);
           }
         }
       }
@@ -671,12 +684,44 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
     {
       m_lastSelectedItem = GetCurrentItemName();
 
+      //int *p = NULL;
+      //*p = 1;
+
+
       int iAction = message.GetParam1();
-      if (iAction == ACTION_SELECT_ITEM)
+      if (iAction == ACTION_SELECT_ITEM || iAction == ACTION_PLAYER_PLAY)
       {
         int iControl = message.GetSenderId();
-        PlayFileFromContainer(GetControl(iControl));
-        return true;
+        
+        CGUIBaseContainer *container = (CGUIBaseContainer*)GetControl(iControl);
+        if (container)
+        {
+          CGUIListItemPtr litem = container->GetListItem(0);
+          CFileItemPtr item;
+          if (litem->IsFileItem())
+            item = boost::static_pointer_cast<CFileItem>(litem);
+
+          if (!item)
+            return false;
+
+          if (iAction == ACTION_SELECT_ITEM && PlexUtils::CurrentSkinHasPreplay() &&
+              item->GetPlexDirectoryType() != PLEX_DIR_TYPE_PHOTO)
+          {
+            OpenItem(item);
+            return true;
+          }
+          else
+          {
+            PlayFileFromContainer(container);
+            return true;
+          }
+        }
+        else
+        {
+          CFileItemPtr item = GetCurrentListItem();
+          OpenItem(item);
+          return true;
+        }
       }
     }
       break;
@@ -686,193 +731,204 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIWindowHome::OpenItem(CFileItemPtr item)
+{
+  CStdString url = m_navHelper.navigateToItem(item, CURL(), GetID());
+  if (!url.empty())
+  {
+    CLog::Log(LOGDEBUG, "CGUIWindowHome::OpenItem got %s back from navigateToItem, not sure what to do with it?", url.c_str());
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIWindowHome::OnJobComplete(unsigned int jobID, bool success, CJob *job)
+{
+  CPlexDirectoryFetchJob *fjob = static_cast<CPlexDirectoryFetchJob*>(job);
+  m_cacheLoadFail = !success;
+
+  if (success && fjob)
+    g_directoryCache.SetDirectory(fjob->m_url.Get(), fjob->m_items, DIR_CACHE_ALWAYS);
+
+  m_loadNavigationEvent.Set();
+}
+
+CGUIStaticItemPtr CGUIWindowHome::ItemToSection(CFileItemPtr item)
+{
+  CGUIStaticItemPtr newItem = CGUIStaticItemPtr(new CGUIStaticItem);
+  newItem->SetLabel(item->GetLabel());
+  newItem->SetLabel2(item->GetProperty("serverName").asString());
+  newItem->SetProperty("sectionNameCollision", item->GetProperty("sectionNameCollision"));
+  newItem->SetProperty("plex", true);
+  newItem->SetProperty("sectionPath", item->GetPath());
+  newItem->SetPlexDirectoryType(item->GetPlexDirectoryType());
+  newItem->m_bIsFolder = true;
+
+  AddSection(item->GetPath(),
+             CGUIWindowHome::GetSectionTypeFromDirectoryType(item->GetPlexDirectoryType()));
+
+  return newItem;
+}
+
+static bool _sortLabels(const CGUIListItemPtr& item1, const CGUIListItemPtr& item2)
+{
+  if (item1->GetLabel() == item2->GetLabel())
+    return (item1->GetLabel2() < item2->GetLabel2());
+  
+  if (item1->GetLabel2() == "myPlex")
+    return false;
+  if (item2->GetLabel2() == "myPlex")
+    return true;
+
+  return (item1->GetLabel() < item2->GetLabel());
+}
+
 void CGUIWindowHome::UpdateSections()
 {
-  // This will be our new list.
-  vector<CGUIListItemPtr> newList;
-
   CLog::Log(LOGDEBUG, "CGUIWindowHome::UpdateSections");
 
-  // Get the old list.
-  CGUIBaseContainer* control = (CGUIBaseContainer* )GetControl(MAIN_MENU);
-  if (control == 0)
-    control = (CGUIBaseContainer* )GetControl(300);
-
-  if (control)
+  CGUIBaseContainer* control = (CGUIBaseContainer*)GetControl(MAIN_MENU);
+  if (!control)
   {
-    vector<CGUIListItemPtr>& oldList = control->GetStaticItems();
+    CLog::Log(LOGWARNING, "CGUIWindowHome::UpdateSections can't find MAIN_MENU control");
+    return;
+  }
 
-    // First collect all the real items, minus the channel entries.
-    BOOST_FOREACH(CGUIListItemPtr item, oldList)
+  vector<CGUIListItemPtr>& oldList = control->GetStaticItems();
+
+  CFileItemListPtr sections = g_plexApplication.dataLoader->GetAllSections();
+  vector<CGUIListItemPtr> newList;
+  vector<CGUIListItemPtr> newSections;
+
+  bool listUpdated = false;
+  bool haveShared = false;
+  bool haveChannels = false;
+  bool haveUpdate = false;
+
+  for (int i = 0; i < oldList.size(); i ++)
+  {
+    CGUIListItemPtr item = oldList[i];
+    if (!item->HasProperty("plex"))
     {
-      // Collect the channel items. They may get removed after that, so we'll keep them around.
-      CFileItem* fileItem = (CFileItem* )item.get();
-      if (fileItem->m_iprogramCount == CHANNELS_VIDEO)
-        m_videoChannelItem = item;
-      else if (fileItem->m_iprogramCount == CHANNELS_MUSIC)
-        m_musicChannelItem = item;
-      else if (fileItem->m_iprogramCount == CHANNELS_PHOTO)
-        m_photoChannelItem = item;
-      else if (fileItem->m_iprogramCount == CHANNELS_APPLICATION)
-        m_applicationChannelItem = item;
-      else if (item->HasProperty("plex") == false)
+      if (item->HasProperty("plexshared"))
+      {
+        haveShared = true;
+        if (g_plexApplication.dataLoader->HasSharedSections())
+          newList.push_back(item);
+      }
+      else if (item->HasProperty("plexchannels"))
+      {
+        haveChannels = true;
+        if (g_plexApplication.dataLoader->HasChannels())
+          newList.push_back(item);
+      }
+      else if (item->HasProperty("plexupdate"))
+      {
+        haveUpdate = true;
         newList.push_back(item);
-    }
-
-
-    map<string, HostSourcesPtr> sourcesMap;
-    CPlexSourceScanner::GetMap(sourcesMap);
-
-    // Collect the channels, keeping track of how many there are.
-    int numVideo = 0;
-    int numPhoto = 0;
-    int numMusic = 0;
-    int numApplication = 0;
-
-    BOOST_FOREACH(string_sources_pair nameSource, sourcesMap)
-    {
-      numVideo += nameSource.second->videoSources.size();
-      numPhoto += nameSource.second->pictureSources.size();
-      numMusic += nameSource.second->musicSources.size();
-      numApplication += nameSource.second->applicationSources.size();
-    }
-    
-    // Now collect the library sections.
-    vector<CFileItemPtr> newSections;
-    PlexLibrarySectionManager::Get().getOwnedSections(newSections);
-
-    // Count the names.
-    map<string, int> nameCounts;
-    BOOST_FOREACH(CFileItemPtr section, newSections)
-    {
-      CStdString sectionName = section->GetLabel();
-      ++nameCounts[sectionName.ToLower()];
-    }
-
-    // Add the queue if needed.
-    CFileItemList queue;
-    if (MyPlexManager::Get().getPlaylist(queue, "queue", true) && queue.Size() > 0)
-    {
-      CFileItemPtr queue = CFileItemPtr(new CFileItem(g_localizeStrings.Get(44021)));
-      queue->SetProperty("type", "mixed");
-      queue->SetProperty("typeNumber", PLEX_METADATA_MIXED);
-      queue->SetProperty("key", MyPlexManager::Get().getPlaylistUrl("queue"));
-      queue->SetPath(queue->GetProperty("key").asString());
-      newSections.push_back(queue);
-    }
-    
-    CFileItemList recommendations;
-    if (MyPlexManager::Get().getPlaylist(recommendations, "recommendations", true) && recommendations.Size() > 0)
-    {
-      CFileItemPtr rec = CFileItemPtr(new CFileItem(g_localizeStrings.Get(44022)));
-      rec->SetProperty("type", "mixed");
-      rec->SetProperty("typeNumber", PLEX_METADATA_MIXED);
-      rec->SetProperty("key", MyPlexManager::Get().getPlaylistUrl("recommendations"));
-      rec->SetPath(rec->GetProperty("key").asString());
-      newSections.push_back(rec);
-    }
-
-    // Add the shared content menu if needed.
-    if (PlexLibrarySectionManager::Get().getNumSharedSections() > 0)
-    {
-      CFileItemPtr shared = CFileItemPtr(new CFileItem(g_localizeStrings.Get(44020)));
-      shared->SetProperty("key", "plex://shared");
-      shared->SetPath(shared->GetProperty("key").asString());
-      newSections.push_back(shared);
-    }
-
-    // Now add the new ones.
-    int id = 1000;
-    BOOST_FOREACH(CFileItemPtr item, newSections)
-    {
-      CGUIStaticItemPtr newItem = CGUIStaticItemPtr(new CGUIStaticItem());
-      newItem->SetLabel(item->GetLabel());
-      newItem->SetProperty("plex", "1");
-
-      if (item->GetProperty("key").asString().find("/library/sections") != string::npos)
-        newItem->SetProperty("section", "1");
-
-      CStdString sectionName = item->GetLabel();
-      if (nameCounts[sectionName.ToLower()] > 1)
-        newItem->SetLabel2(item->GetLabel2());
-
-      // Adding the section for preloading the fans
-      AddSection(item->GetPath(), (int)item->GetProperty("typeNumber").asInteger());
-
-      if (item->GetProperty("key").asString().find("/shared") != string::npos)
-      {
-        CStdString path = "XBMC.ActivateWindow(MySharedContent," + item->GetPath() + ",return)";
-        newItem->SetClickActions(CGUIAction("", path));
-        newItem->SetPath(path);
-      }
-      else if (item->GetProperty("type").asString() == "artist")
-      {
-        CStdString path = "XBMC.ActivateWindow(MyMusicFiles," + item->GetPath() + ",return)";
-        newItem->SetClickActions(CGUIAction("", path));
-        newItem->SetPath(path);
-      }
-      else if (item->GetProperty("type").asString() == "photo")
-      {
-        CStdString path = "XBMC.ActivateWindow(MyPictures," + item->GetPath() + ",return)";
-        newItem->SetClickActions(CGUIAction("", path));
-        newItem->SetPath(path);
       }
       else
+        newList.push_back(item);
+    }
+    else
+    {
+      CFileItemPtr foundItem;
+      for (int y = 0; y < sections->Size(); y++)
       {
-        CStdString path = "XBMC.ActivateWindow(MyVideoFiles," + item->GetPath() + ",return)";
-        newItem->SetClickActions(CGUIAction("", path));
-        newItem->SetPath(path);
+        CFileItemPtr sectionItem = sections->Get(y);
+        if(sectionItem->GetPath() == item->GetProperty("sectionPath").asString())
+          foundItem = sectionItem;
       }
 
-      newItem->m_idepth = 0;
-      if (item->HasArt(PLEX_ART_FANART))
-        newItem->SetArt(PLEX_ART_FANART, item->GetArt(PLEX_ART_FANART));
-      newItem->m_iprogramCount = id++;
-      newItem->SetProperty("sectionPath", item->GetPath());
+      if (foundItem)
+      {
+        /* If label or label2 has changed we need to update it */
+        if (item->GetLabel() != foundItem->GetLabel())
+        {
+          listUpdated = true;
+          item->SetLabel(foundItem->GetLabel());
+        }
+        item->SetProperty("sectionNameCollision", foundItem->GetProperty("sectionNameCollision"));
 
-      newList.push_back(newItem);
+        newSections.push_back(item);
+      }
+      else
+        /* this means that a server has been removed */
+        listUpdated = true;
     }
+  }
 
-    // See what channel entries to add.
-    if (numApplication > 0)
+  for (int i = 0; i < sections->Size(); i++)
+  {
+    CFileItemPtr sectionItem = sections->Get(i);
+    bool found = false;
+
+    for(int y = 0; y < newSections.size(); y++)
     {
-      newList.push_back(m_applicationChannelItem);
-      m_applicationChannelItem->SetProperty("sectionPath", "channel://application");
-      AddSection("channel://application", PLEX_METADATA_CHANNEL_APPLICATION);
+      CGUIListItemPtr item = newSections[y];
+
+      if (item->GetProperty("sectionPath").asString() == sectionItem->GetPath())
+      {
+        found = true;
+      }
     }
 
-    if (numVideo > 0)
+    if (!found)
     {
-      newList.push_back(m_videoChannelItem);
-      m_videoChannelItem->SetProperty("sectionPath", "channel://video");
-      AddSection("channel://video", PLEX_METADATA_CHANNEL_VIDEO);
+      newSections.push_back(ItemToSection(sectionItem));
+      listUpdated = true;
     }
+  }
 
-    if (numPhoto > 0)
-    {
-      newList.push_back(m_photoChannelItem);
-      m_photoChannelItem->SetProperty("sectionPath", "channel://photo");
-      AddSection("channel://photo", PLEX_METADATA_CHANNEL_PHOTO);
-    }
+  std::sort(newSections.begin(), newSections.end(), _sortLabels);
+  for(int i = 0; i < newSections.size(); i ++)
+  {
+    CGUIListItemPtr item = newSections[i];
+    newList.push_back(item);
+  }
 
-    if (numMusic > 0)
-    {
-      newList.push_back(m_musicChannelItem);
-      m_musicChannelItem->SetProperty("sectionPath", "channel://music");
-      AddSection("channel://music", PLEX_METADATA_CHANNEL_MUSIC);
-    }
 
-    // Replace 'em.
+  if (g_plexApplication.dataLoader->HasChannels() && !haveChannels)
+  {
+    /* We need the channel button as well */
+    CGUIStaticItemPtr item = CGUIStaticItemPtr(new CGUIStaticItem);
+    item->SetLabel(g_localizeStrings.Get(52102));
+    item->SetProperty("plexchannels", true);
+    item->SetProperty("sectionPath", "plexserver://channels/");
+    item->SetProperty("navigateDirectly", true);
+
+    item->SetPath("XBMC.ActivateWindow(MyChannels,plexserver://channels,return)");
+    item->SetClickActions(CGUIAction("", item->GetPath()));
+    newList.push_back(item);
+    listUpdated = true;
+
+    AddSection("plexserver://channels/", SECTION_TYPE_CHANNELS);
+  }
+
+
+  if (g_plexApplication.dataLoader->HasSharedSections() && !haveShared)
+  {
+    CGUIStaticItemPtr item = CGUIStaticItemPtr(new CGUIStaticItem);
+    item->SetLabel(g_localizeStrings.Get(44020));
+    item->SetProperty("plexshared", true);
+    item->SetProperty("sectionPath", "plexserver://shared");
+    item->SetPath("XBMC.ActivateWindow(MySharedContent,plexserver://shared,return)");
+    item->SetClickActions(CGUIAction("", item->GetPath()));
+    item->SetProperty("navigateDirectly", true);
+    newList.push_back(item);
+    listUpdated = true;
+  }
+
+  if (listUpdated)
+  {
     control->SetStaticContent(newList);
-
     RestoreSection();
   }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CGUIWindowHome::HideAllLists()
 {
-  CLog::Log(LOGDEBUG, "CGUIWindowHome:HideAllLists");
   // Hide lists.
   short lists[] = {CONTENT_LIST_ON_DECK, CONTENT_LIST_RECENTLY_ACCESSED, CONTENT_LIST_RECENTLY_ADDED, CONTENT_LIST_QUEUE, CONTENT_LIST_RECOMMENDATIONS};
   BOOST_FOREACH(int id, lists)
@@ -883,10 +939,11 @@ void CGUIWindowHome::HideAllLists()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CGUIWindowHome::AddSection(const CStdString &url, int type)
+void CGUIWindowHome::AddSection(const CStdString &url, SectionTypes type)
 {
   if (m_sections.find(url) == m_sections.end())
   {
+    CLog::Log(LOG_LEVEL_DEBUG, "CGUIWindowHome::AddSection Adding section %s", url.c_str());
     CPlexSectionFanout* fan = new CPlexSectionFanout(url, type);
     m_sections[url] = fan;
   }
@@ -904,25 +961,26 @@ void CGUIWindowHome::RemoveSection(const CStdString &url)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-std::vector<contentListPair> CGUIWindowHome::GetContentListsFromSection(const CStdString &url)
+bool CGUIWindowHome::GetContentTypesFromSection(const CStdString &url, std::vector<int> &list)
 {
   if (m_sections.find(url) != m_sections.end())
   {
     CPlexSectionFanout* section = m_sections[url];
-    return section->GetContentLists();
+    section->GetContentTypes(list);
+    return true;
   }
-  return std::vector<contentListPair>();
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CFileItemListPtr CGUIWindowHome::GetContentListFromSection(const CStdString &url, int contentType)
+bool CGUIWindowHome::GetContentListFromSection(const CStdString &url, int contentType, CFileItemList &l)
 {
   if (m_sections.find(url) != m_sections.end())
   {
     CPlexSectionFanout* section = m_sections[url];
-    CFileItemListPtr list = section->GetContentList(contentType);
-    if ((list && list->Size() > 0) || contentType != CONTENT_LIST_FANART)
-      return section->GetContentList(contentType);
+    section->GetContentList(contentType, l);
+    if (l.Size() > 0 || contentType != CONTENT_LIST_FANART)
+      return true;
   }
 
   if (contentType == CONTENT_LIST_FANART &&
@@ -930,11 +988,10 @@ CFileItemListPtr CGUIWindowHome::GetContentListFromSection(const CStdString &url
   {
     /* Special case */
     CGUIBaseContainer *container = (CGUIBaseContainer*)GetControl(MAIN_MENU);
-    CFileItemList* list = new CFileItemList();
-    CFileItemPtr defaultItem = CFileItemPtr(new CFileItem(CPlexSectionFanout::GetBestServerUrl(":/resources/show-fanart.jpg"), false));
+    CFileItemPtr defaultItem(new CFileItem(CPlexSectionFanout::GetBestServerUrl(":/resources/show-fanart.jpg"), false));
 
     if (!container)
-      list->Add(defaultItem);
+      l.Add(defaultItem);
 
     BOOST_FOREACH(CGUIListItemPtr fileItem, container->GetItems())
     {
@@ -942,24 +999,48 @@ CFileItemListPtr CGUIWindowHome::GetContentListFromSection(const CStdString &url
           fileItem->GetProperty("sectionPath").asString() == url)
       {
         if (fileItem->HasArt(PLEX_ART_FANART))
-          list->Add(CFileItemPtr(new CFileItem(fileItem->GetArt(PLEX_ART_FANART), false)));
+          l.Add(CFileItemPtr(new CFileItem(fileItem->GetArt(PLEX_ART_FANART), false)));
         else
-          list->Add(defaultItem);
+          l.Add(defaultItem);
         break;
       }
     }
 
-    if (list->Size() == 0)
-      list->Add(defaultItem);
+    if (l.Size() == 0)
+      l.Add(defaultItem);
 
-    return CFileItemListPtr(list);
+    return true;
   }
 
-  return CFileItemListPtr();
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CGUIWindowHome::RefreshSection(const CStdString &url, int type)
+void CGUIWindowHome::SectionNeedsRefresh(const CStdString &url)
+{
+  if (m_sections.find(url) != m_sections.end())
+  {
+    CPlexSectionFanout* section = m_sections[url];
+    section->m_needsRefresh = true;
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIWindowHome::OnTimeout()
+{
+  if (GetCurrentItemName() == m_lastSelectedItem)
+  {
+    CFileItemPtr pItem = GetCurrentListItem();
+    if (!ShowSection(pItem->GetProperty("sectionPath").asString()) && !m_globalArt)
+    {
+      HideAllLists();
+      ShowSection("global://art/");
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIWindowHome::RefreshSection(const CStdString &url, SectionTypes type)
 {
   if (m_sections.find(url) != m_sections.end())
   {
@@ -971,7 +1052,6 @@ void CGUIWindowHome::RefreshSection(const CStdString &url, int type)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-typedef std::pair<CStdString, CPlexSectionFanout*> nameSectionPair;
 void CGUIWindowHome::RefreshAllSections(bool force)
 {
   BOOST_FOREACH(nameSectionPair p, m_sections)
@@ -980,6 +1060,19 @@ void CGUIWindowHome::RefreshAllSections(bool force)
       p.second->Refresh();
   }
 
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIWindowHome::RefreshSectionsForServer(const CStdString &uuid)
+{
+  BOOST_FOREACH(nameSectionPair p, m_sections)
+  {
+    CURL sectionUrl(p.first);
+    if (sectionUrl.GetHostName() == uuid)
+    {
+      CLog::Log(LOGDEBUG, "CGUIWindowHome::RefreshSectionsForServer refreshing section %s because it belongs to server %s", p.first.c_str(), uuid.c_str());
+      p.second->m_needsRefresh = true;
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -990,7 +1083,7 @@ bool CGUIWindowHome::ShowSection(const CStdString &url)
     CPlexSectionFanout* section = m_sections[url];
     section->Show();
     
-    if (url == "global://art")
+    if (url == "global://art/")
       m_globalArt = true;
     else
       m_globalArt = false;
@@ -1028,7 +1121,6 @@ CStdString CGUIWindowHome::GetCurrentItemName(bool onlySections)
 ///////////////////////////////////////////////////////////////////////////////////////////
 void CGUIWindowHome::RestoreSection()
 {
-  CLog::Log(LOGDEBUG, "CGUIWindowHome:RestoreSection %s", m_lastSelectedItem.c_str());
   if (m_lastSelectedItem == GetCurrentItemName())
   {
     ShowSection(m_lastSelectedItem);
@@ -1062,35 +1154,27 @@ void CGUIWindowHome::RestoreSection()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-void CAuxFanLoadThread::Process()
+SectionTypes
+CGUIWindowHome::GetSectionTypeFromDirectoryType(EPlexDirectoryType dirType)
 {
-  while (!m_bStop)
+  if (dirType == PLEX_DIR_TYPE_MOVIE)
+    return SECTION_TYPE_MOVIE;
+  else if (dirType == PLEX_DIR_TYPE_SHOW)
+    return SECTION_TYPE_SHOW;
+  else if (dirType == PLEX_DIR_TYPE_ALBUM)
+    return SECTION_TYPE_ALBUM;
+  else if (dirType == PLEX_DIR_TYPE_PHOTOALBUM || dirType == PLEX_DIR_TYPE_PHOTO)
+    return SECTION_TYPE_PHOTOS;
+  else if (dirType == PLEX_DIR_TYPE_ARTIST)
+    return SECTION_TYPE_ALBUM;
+  else if (dirType == PLEX_DIR_TYPE_PLAYLIST)
+    return SECTION_TYPE_QUEUE;
+  else if (dirType == PLEX_DIR_TYPE_HOME_MOVIES)
+    return SECTION_TYPE_HOME_MOVIE;
+  else
   {
-    CLog::Log(LOGDEBUG, "CAFL: sleeping %d seconds", m_numSeconds);
-    boost::this_thread::sleep(boost::posix_time::seconds(m_numSeconds));
-
-    if (g_windowManager.GetActiveWindow() == 10016)
-      continue;
-
-    if (g_guiSettings.GetString("myplex.token").empty() == true)
-    {
-      CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(44200), g_localizeStrings.Get(44201), g_localizeStrings.Get(44202), "");
-      CApplicationMessenger::Get().ExecBuiltIn("XBMC.ActivateWindow(16)");
-    }
-    else
-    {
-      MyPlexManager::Get().GetUserInfo();
-      if (!MyPlexManager::Get().UserHaveSubscribed())
-      {
-        CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(44203), g_localizeStrings.Get(44201), g_localizeStrings.Get(44202), "");
-        CApplicationMessenger::Get().ExecBuiltIn("XBMC.ActivateWindow(16)");
-      }
-      else
-      {
-        // Since we had a successful login we can sleep longer
-        m_numSeconds = 30 * 60;
-      }
-    }
+    CLog::Log(LOGINFO, "CGUIWindowHome::GetSectionTypeFromDirectoryType not handling DirectoryType %d", (int)dirType);
+    return SECTION_TYPE_MOVIE;
   }
 }
 

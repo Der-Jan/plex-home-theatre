@@ -242,8 +242,6 @@ void CSoftAE::InternalOpenSink()
       {
         if (m_masterStream->m_initChannelLayout == AE_CH_LAYOUT_2_0)
           m_transcode = false;
-        m_encoderInitFrameSizeMul  = 1.0 / (newFormat.m_channelLayout.Count() * 
-                                           (CAEUtil::DataFormatToBits(newFormat.m_dataFormat) >> 3));
         m_encoderInitSampleRateMul = 1.0 / newFormat.m_sampleRate;
       }
     }
@@ -348,7 +346,6 @@ void CSoftAE::InternalOpenSink()
 
     m_sinkFormat              = newFormat;
     m_sinkFormatSampleRateMul = 1.0 / (double)newFormat.m_sampleRate;
-    m_sinkFormatFrameSizeMul  = 1.0 / (double)newFormat.m_frameSize;
     m_sinkBlockSize           = newFormat.m_frames * newFormat.m_frameSize;
     // check if sink controls volume, if so, init the volume.
     m_sinkHandlesVolume       = m_sink->HasVolume();
@@ -376,6 +373,7 @@ void CSoftAE::InternalOpenSink()
     m_convertFn      = NULL;
     m_bytesPerSample = CAEUtil::DataFormatToBits(m_sinkFormat.m_dataFormat) >> 3;
     m_frameSize      = m_sinkFormat.m_frameSize;
+    m_frameSizeMul   = 1.0 / (double)m_frameSize;
     neededBufferSize = m_sinkFormat.m_frames * m_sinkFormat.m_frameSize;
   }
   else
@@ -428,6 +426,7 @@ void CSoftAE::InternalOpenSink()
 
     m_bytesPerSample = CAEUtil::DataFormatToBits(AE_FMT_FLOAT) >> 3;
     m_frameSize      = m_bytesPerSample * m_chLayout.Count();
+    m_frameSizeMul   = 1.0 / (double)m_frameSize;
   }
 
   CLog::Log(LOGDEBUG, "CSoftAE::InternalOpenSink - Internal Buffer Size: %d", (int)neededBufferSize);
@@ -681,6 +680,14 @@ void CSoftAE::EnumerateOutputDevices(AEDeviceList &devices, bool passthrough)
       if (passthrough && devInfo.m_deviceType == AE_DEVTYPE_PCM)
         continue;
 
+        /* PLEX */
+      /* Direct Sound can NOT be used for HD formats */
+      if ((g_guiSettings.GetBool("audiooutput.truehdpassthrough") || g_guiSettings.GetBool("audiooutput.dtshdpassthrough")) &&
+        sinkInfo.m_sinkName == "DirectSound" && passthrough)
+        continue;
+      /* END PLEX */
+
+
       std::string device = sinkInfo.m_sinkName + ":" + devInfo.m_deviceName;
 
       std::stringstream ss;
@@ -891,11 +898,11 @@ double CSoftAE::GetDelay()
  
   if (m_transcode && m_encoder && !m_rawPassthrough)
   {
-    delayBuffer     = (double)m_buffer.Used() * m_encoderInitFrameSizeMul * m_encoderInitSampleRateMul;
+    delayBuffer     = (double)m_buffer.Used() * m_frameSizeMul * m_encoderInitSampleRateMul;
     delayTranscoder = m_encoder->GetDelay((double)m_encodedBuffer.Used() * m_encoderFrameSizeMul);
   }
   else
-    delayBuffer = (double)m_buffer.Used() * m_sinkFormatFrameSizeMul *m_sinkFormatSampleRateMul;
+    delayBuffer = (double)m_buffer.Used() * m_frameSizeMul *m_sinkFormatSampleRateMul;
 
   return delayBuffer + delaySink + delayTranscoder;
 }
@@ -910,11 +917,11 @@ double CSoftAE::GetCacheTime()
 
   if (m_transcode && m_encoder && !m_rawPassthrough)
   {
-    timeBuffer     = (double)m_buffer.Used() * m_encoderInitFrameSizeMul * m_encoderInitSampleRateMul;
+    timeBuffer     = (double)m_buffer.Used() * m_frameSizeMul * m_encoderInitSampleRateMul;
     timeTranscoder = m_encoder->GetDelay((double)m_encodedBuffer.Used() * m_encoderFrameSizeMul);
   }
   else
-    timeBuffer = (double)m_buffer.Used() * m_sinkFormatFrameSizeMul *m_sinkFormatSampleRateMul;
+    timeBuffer = (double)m_buffer.Used() * m_frameSizeMul *m_sinkFormatSampleRateMul;
 
   return timeBuffer + timeSink + timeTranscoder;
 }
@@ -929,11 +936,11 @@ double CSoftAE::GetCacheTotal()
 
   if (m_transcode && m_encoder && !m_rawPassthrough)
   {
-    timeBuffer     = (double)m_buffer.Size() * m_encoderInitFrameSizeMul * m_encoderInitSampleRateMul;
+    timeBuffer     = (double)m_buffer.Size() * m_frameSizeMul * m_encoderInitSampleRateMul;
     timeTranscoder = m_encoder->GetDelay((double)m_encodedBuffer.Size() * m_encoderFrameSizeMul);
   }
   else
-    timeBuffer = (double)m_buffer.Size() * m_sinkFormatFrameSizeMul *m_sinkFormatSampleRateMul;
+    timeBuffer = (double)m_buffer.Size() * m_frameSizeMul *m_sinkFormatSampleRateMul;
 
   return timeBuffer + timeSink + timeTranscoder;
 }
@@ -1535,7 +1542,8 @@ inline void CSoftAE::ProcessSuspend()
      */
     if (!m_isSuspended && (!m_playingStreams.empty() || !m_playing_sounds.empty()))
     {
-      m_reOpen = !m_sink->SoftResume() || m_reOpen; // sink returns false if it requires reinit (worthless with current implementation)
+      // the sink might still be not initialized after Resume of real suspend
+      m_reOpen = m_sink && (!m_sink->SoftResume() || m_reOpen); // sink returns false if it requires reinit (worthless with current implementation)
       m_sinkIsSuspended = false; //sink processing data
       m_softSuspend   = false; //break suspend loop (under some conditions)
       CLog::Log(LOGDEBUG, "Resumed the Sink");

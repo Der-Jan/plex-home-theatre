@@ -35,10 +35,13 @@
 #include "guilib/LocalizeStrings.h"
 #include "interfaces/AnnouncementManager.h"
 
-/* PLEX */
-//#include "PlexAsyncUrlResolver.h"
-/* END PLEX */
+using namespace PLAYLIST;
 
+CPlayListPlayer::CPlayListPlayer(void)
+{
+  m_PlaylistMusic = new CPlayList(PLAYLIST_MUSIC);
+  m_PlaylistVideo = new CPlayList(PLAYLIST_VIDEO);
+  m_PlaylistEmpty = new CPlayList;
 using namespace PLAYLIST;
 
 CPlayListPlayer::CPlayListPlayer(void)

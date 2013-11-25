@@ -340,9 +340,7 @@ void CCoreAudioHardware::GetOutputDeviceName(std::string& name)
     if (ret != noErr)
       return;
 
-    CStdString n;
-    if (DarwinCFStringRefToString(theDeviceName, n))
-      name = n;
+    DarwinCFStringRefToUTF8String(theDeviceName, name);
 
     CFRelease(theDeviceName);
   }
@@ -380,6 +378,10 @@ UInt32 CCoreAudioHardware::GetOutputDevices(CoreAudioDeviceList *pList)
     for (size_t dev = 0; dev < deviceCount; dev++)
     {
       CCoreAudioDevice device(pDevices[dev]);
+      /* PLEX */
+      if (device.GetName() == "AirPlay")
+        continue;
+      /* END PLEX */
       if (device.GetTotalOutputChannels() == 0)
         continue;
       found++;

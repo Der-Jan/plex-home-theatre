@@ -62,10 +62,12 @@ namespace MEDIA_DETECT
 #include "threads/Thread.h"
 
 /* PLEX */
-#include "plex/LaunchHost.h"
+#include "plex/Windows/LaunchHost.h"
+class CPlexHTTPRemoteHandler;
 class CGUIDialogCache;
 class PlexApplication;
 typedef boost::shared_ptr<PlexApplication> PlexApplicationPtr;
+#include "plex/CrashReporter/Breakpad.h"
 /* END PLEX */
 
 class CSeekHandler;
@@ -394,6 +396,8 @@ public:
   void OnWakeUp();
 
   void ForceVersionCheck();
+  void SetReturnFromAutoUpdate() { m_returnFromAutoUpdate = true; }
+  bool GetReturnedFromAutoUpdate() const { return m_returnFromAutoUpdate; }
   /* END PLEX */
 protected:
   bool LoadSkin(const CStdString& skinID);
@@ -504,7 +508,13 @@ protected:
 
 
   /* PLEX */
+#ifdef HAVE_BREAKPAD
+  BreakpadScope *m_breakpad;
+#endif
+
+  CPlexHTTPRemoteHandler& m_plexRemoteHandler;
   LaunchHost *m_pLaunchHost;
+  bool m_returnFromAutoUpdate;
   /* END PLEX */
 };
 

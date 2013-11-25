@@ -87,6 +87,7 @@ namespace XFILE
       bool Put(const CStdString& strURL, CStdString& strHTML);
       bool Delete(const CStdString& strURL, CStdString& strHTML);
       void ClearCookies() { m_clearCookies = true; }
+      long GetLastHTTPResponseCode() const { return m_httpresponse; }
       /* END PLEX */
 
       class CReadState
@@ -107,6 +108,7 @@ namespace XFILE
           int64_t         m_fileSize;
           int64_t         m_filePos;
           bool            m_bFirstLoop;
+          bool            m_sendRange;
 
           /* returned http header */
           CHttpHeader m_httpheader;
@@ -127,11 +129,15 @@ namespace XFILE
           /* PLEX */
           CStdString    m_strDeadEndUrl; // If we can't redirect, this holds the last URL.
           int           m_ticklePipe[2];
+          std::string   m_url; // this is the URL that we are fetching, mostly for debug purpose.
+
+          bool          m_hasTicklePipe;
 
           void Cancel()
           {
 #ifndef TARGET_WINDOWS
-            write(m_ticklePipe[1], "Q", 1);
+            if (m_hasTicklePipe)
+              write(m_ticklePipe[1], "Q", 1);
 #endif
             m_cancelled = true;
           }

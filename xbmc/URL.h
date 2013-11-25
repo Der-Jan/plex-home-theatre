@@ -87,9 +87,16 @@ public:
   void RemoveOption(const CStdString &key);
 
   /* PLEX */
-  const CStdString& GetUrlWithoutOptions() const;
+  CStdString GetUrlWithoutOptions() const;
+  void AddOptions(const CUrlOptions &options);
   /* END PLEX */
 
+  void GetProtocolOptions(std::map<CStdString, CStdString> &options) const;
+  bool HasProtocolOption(const CStdString &key) const;
+  bool GetProtocolOption(const CStdString &key, CStdString &value) const;
+  CStdString GetProtocolOption(const CStdString &key) const;
+  void SetProtocolOption(const CStdString &key, const CStdString &value);
+  void RemoveProtocolOption(const CStdString &key);
 
 protected:
   int m_iPort;
@@ -104,8 +111,5 @@ protected:
   CStdString m_strOptions;
   CStdString m_strProtocolOptions;
   CUrlOptions m_options;
-
-  /* PLEX */
-  CStdString m_strWithoutOptions;
-  /* END PLEX */
+  CUrlOptions m_protocolOptions;
 };

@@ -45,6 +45,12 @@
 #include "interfaces/AnnouncementManager.h"
 #include "pictures/PictureInfoTag.h"
 
+/* PLEX */
+#include "Client/PlexMediaServerClient.h"
+#include "PlexApplication.h"
+#include "Client/PlexTimelineManager.h"
+/* END PLEX */
+
 using namespace XFILE;
 
 #define MAX_ZOOM_FACTOR                     10
@@ -161,6 +167,10 @@ void CGUIWindowSlideShow::AnnouncePlayerPlay(const CFileItemPtr& item)
   param["player"]["speed"] = 1;
   param["player"]["playerid"] = PLAYLIST_PICTURE;
   ANNOUNCEMENT::CAnnouncementManager::Announce(ANNOUNCEMENT::Player, "xbmc", "OnPlay", item, param);
+  
+  /* PLEX */
+  g_plexApplication.timelineManager->ReportProgress(item, m_bPause ? CPlexTimelineManager::MEDIA_STATE_PAUSED : CPlexTimelineManager::MEDIA_STATE_PLAYING);
+  /* END PLEX */
 }
 
 void CGUIWindowSlideShow::AnnouncePlayerPause(const CFileItemPtr& item)
@@ -169,6 +179,10 @@ void CGUIWindowSlideShow::AnnouncePlayerPause(const CFileItemPtr& item)
   param["player"]["speed"] = 0;
   param["player"]["playerid"] = PLAYLIST_PICTURE;
   ANNOUNCEMENT::CAnnouncementManager::Announce(ANNOUNCEMENT::Player, "xbmc", "OnPause", item, param);
+  
+  /* PLEX */
+  g_plexApplication.timelineManager->ReportProgress(item, CPlexTimelineManager::MEDIA_STATE_PAUSED);
+  /* END PLEX */
 }
 
 void CGUIWindowSlideShow::AnnouncePlayerStop(const CFileItemPtr& item)
@@ -177,6 +191,10 @@ void CGUIWindowSlideShow::AnnouncePlayerStop(const CFileItemPtr& item)
   param["player"]["playerid"] = PLAYLIST_PICTURE;
   param["end"] = true;
   ANNOUNCEMENT::CAnnouncementManager::Announce(ANNOUNCEMENT::Player, "xbmc", "OnStop", item, param);
+
+  /* PLEX */
+  g_plexApplication.timelineManager->ReportProgress(item, CPlexTimelineManager::MEDIA_STATE_STOPPED);
+  /* END PLEX */
 }
 
 void CGUIWindowSlideShow::AnnouncePlaylistRemove(int pos)

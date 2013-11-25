@@ -8,8 +8,11 @@
 #include "pvr/recordings/PVRRecordings.h"
 
 /* PLEX */
-#include "PlexMediaServerQueue.h"
+#include "Client/PlexMediaServerClient.h"
+#include "Client/PlexTimelineManager.h"
+#include "Remote/PlexRemoteSubscriberManager.h"
 #include <boost/make_shared.hpp>
+#include "PlexApplication.h"
 /* END PLEX */
 
 class CSaveFileStateJob : public CJob
@@ -37,7 +40,7 @@ bool CSaveFileStateJob::DoWork()
   if (m_item.HasVideoInfoTag() && m_item.GetVideoInfoTag()->m_strFileNameAndPath.Find("removable://") == 0)
     progressTrackingFile = m_item.GetVideoInfoTag()->m_strFileNameAndPath; // this variable contains removable:// suffixed by disc label+uniqueid or is empty if label not uniquely identified
   else if (m_item.HasProperty("original_listitem_url") && 
-      URIUtils::IsPlugin(m_item.GetProperty("original_listitem_url").asString()))
+      (URIUtils::IsPlugin(m_item.GetProperty("original_listitem_url").asString()) || URIUtils::IsBluray(m_item.GetPath()) ) )
     progressTrackingFile = m_item.GetProperty("original_listitem_url").asString();
 
   if (progressTrackingFile != "")
@@ -76,7 +79,9 @@ bool CSaveFileStateJob::DoWork()
             m_item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_UNWATCHED, true);
             updateListing = true;
             /* PLEX */
-            PlexMediaServerQueue::Get().onViewed(boost::make_shared<CFileItem>(m_item), true);
+            CFileItemPtr item = boost::make_shared<CFileItem>(m_item);
+            g_plexApplication.mediaServerClient->SetItemWatched(item);
+            g_plexApplication.timelineManager->ReportProgress(item, CPlexTimelineManager::MEDIA_STATE_STOPPED);
             /* END PLEX */
           }
 #ifndef __PLEX__
@@ -93,10 +98,12 @@ bool CSaveFileStateJob::DoWork()
               videodatabase.AddBookMarkToFile(progressTrackingFile, m_bookmark, CBookmark::RESUME);
 #else
             if (m_bookmark.timeInSeconds < 0.0f)
-              PlexMediaServerQueue::Get().onClearPlayingProgress(boost::make_shared<CFileItem>(m_item));
+            {
+              g_plexApplication.timelineManager->ReportProgress(boost::make_shared<CFileItem>(m_item), CPlexTimelineManager::MEDIA_STATE_STOPPED);
+            }
             else if (m_bookmark.timeInSeconds > 0.0f)
             {
-              PlexMediaServerQueue::Get().onPlayingProgress(boost::make_shared<CFileItem>(m_item), m_bookmark.timeInSeconds*1000, "stopped");
+              g_plexApplication.timelineManager->ReportProgress(boost::make_shared<CFileItem>(m_item), CPlexTimelineManager::MEDIA_STATE_STOPPED, m_bookmark.timeInSeconds*1000);
               m_item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_IN_PROGRESS);
             }
 #endif
@@ -127,9 +134,8 @@ bool CSaveFileStateJob::DoWork()
         {
           CFileItem dbItem(m_item);
           videodatabase.GetStreamDetails(dbItem); // Fetch stream details from the db (if any)
-          
           // Check whether the item's db streamdetails need updating
-          if (!dbItem.GetVideoInfoTag()->HasStreamDetails() || dbItem.GetVideoInfoTag()->m_streamDetails != m_item.GetVideoInfoTag()->m_streamDetails)
+          if (!videodatabase.GetStreamDetails(dbItem) || dbItem.GetVideoInfoTag()->m_streamDetails != m_item.GetVideoInfoTag()->m_streamDetails)
           {
             videodatabase.SetStreamDetailsForFile(m_item.GetVideoInfoTag()->m_streamDetails, progressTrackingFile);
             updateListing = true;

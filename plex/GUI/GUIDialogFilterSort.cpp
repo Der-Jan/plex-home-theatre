@@ -11,22 +11,21 @@
 #include "guilib/GUIControlGroupList.h"
 #include "guilib/GUILabelControl.h"
 #include "GUIWindowManager.h"
+#include "LocalizeStrings.h"
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 CGUIDialogFilterSort::CGUIDialogFilterSort()
   : CGUIDialog(WINDOW_DIALOG_FILTER_SORT, "DialogFilters.xml")
 {
   m_loadType = LOAD_ON_GUI_INIT;
+  m_clearFilters = NULL;
 }
 
-void CGUIDialogFilterSort::SetFilter(CPlexFilterPtr filter)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CGUIDialogFilterSort::SetFilter(CPlexSecondaryFilterPtr filter, int filterButtonId)
 {
   m_filter = filter;
-  m_filterIdMap.clear();
-  m_itemIdMap.clear();
-
-  CFileItemList sublist;
-  if (!filter->GetSublist(sublist))
-    return;
+  m_filterButtonId = filterButtonId;
 
   CGUIControlGroupList* list = (CGUIControlGroupList*)GetControl(FILTER_SUBLIST);
   if (!list)
@@ -34,34 +33,87 @@ void CGUIDialogFilterSort::SetFilter(CPlexFilterPtr filter)
 
   list->ClearAll();
 
-  CGUIRadioButtonControl* radioButton = (CGUIRadioButtonControl*)GetControl(FILTER_SUBLIST_BUTTON);
+  CGUIRadioButtonControl* radioButton = (CGUIRadioButtonControl*)GetControl(FILTER_SUBLIST_RADIO_BUTTON);
   if (!radioButton)
     return;
   radioButton->SetVisible(false);
 
   CGUILabelControl* headerLabel = (CGUILabelControl*)GetControl(FILTER_SUBLIST_LABEL);
   if (headerLabel)
-    headerLabel->SetLabel(filter->GetFilterString());
+    headerLabel->SetLabel(m_filter->getFilterTitle());
 
-  for (int i = 0; i < sublist.Size(); i++)
+  PlexStringPairVector values = m_filter->getFilterValues();
+
+  int id = FILTER_SUBLIST_BUTTONS_START;
+
+  CGUIButtonControl* clearOrig = (CGUIButtonControl*)GetControl(FILTER_SUBLIST_BUTTON);
+  if (clearOrig)
   {
-    CFileItemPtr item = sublist.Get(i);
-    CGUIRadioButtonControl* sublistItem = new CGUIRadioButtonControl(*radioButton);
-    sublistItem->SetLabel(item->GetLabel());
-    sublistItem->SetVisible(true);
-    sublistItem->AllocResources();
-    sublistItem->SetID(FILTER_SUBLIST_BUTTONS_START + i);
+    clearOrig->SetVisible(false);
 
-    if (filter->HasCurrentValue(item->GetProperty("unprocessedKey").asString()))
-      sublistItem->SetSelected(true);
-
-    m_filterIdMap[FILTER_SUBLIST_BUTTONS_START + i] = sublistItem;
-    m_itemIdMap[FILTER_SUBLIST_BUTTONS_START + i] = item;
-    list->AddControl(sublistItem);
+    m_clearFilters = new CGUIButtonControl(*clearOrig);
+    m_clearFilters->SetLabel(g_localizeStrings.Get(44032));
+    m_clearFilters->SetVisible(false);
+    m_clearFilters->AllocResources();
+    m_clearFilters->SetID(99);
+    list->AddControl(m_clearFilters);
   }
 
+  BOOST_FOREACH(PlexStringPair p, values)
+  {
+    CGUIRadioButtonControl* sublistItem = new CGUIRadioButtonControl(*radioButton);
+    sublistItem->SetLabel(p.second);
+    sublistItem->SetVisible(true);
+    sublistItem->AllocResources();
+    sublistItem->SetID(id);
+    sublistItem->SetSelected(m_filter->isSelected(p.first));
+
+    filterControl fc;
+    fc.first = p;
+    fc.second = sublistItem;
+    m_filterMap[id] = fc;
+
+    list->AddControl(sublistItem);
+
+    id++;
+  }
+
+  if (m_clearFilters)
+    m_clearFilters->SetVisible(m_filter->isSelected());
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool CGUIDialogFilterSort::OnAction(const CAction &action)
+{
+  if (action.GetID() == ACTION_CLEAR_FILTERS)
+  {
+    m_filter->clearFilters();
+
+    for (int i = FILTER_SUBLIST_BUTTONS_START; i < 0; i++)
+    {
+      CGUIRadioButtonControl* button = (CGUIRadioButtonControl*)GetControl(i);
+      if (!button)
+        break;
+
+      button->SetSelected(false);
+    }
+
+    if (m_clearFilters)
+      m_clearFilters->SetVisible(false);
+
+    CGUIMessage msg(GUI_MSG_FILTER_SELECTED, WINDOW_DIALOG_FILTER_SORT, 0, m_filterButtonId, 0);
+    msg.SetStringParam(m_filter->getFilterKey());
+    g_windowManager.SendThreadMessage(msg, g_windowManager.GetActiveWindow());
+
+    SetInvalid();
+
+    return true;
+  }
+
+  return CGUIDialog::OnAction(action);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIDialogFilterSort::OnMessage(CGUIMessage &message)
 {
   switch (message.GetMessage())
@@ -69,28 +121,29 @@ bool CGUIDialogFilterSort::OnMessage(CGUIMessage &message)
     case GUI_MSG_CLICKED:
     {
       int senderId = message.GetSenderId();
-      if (m_filterIdMap.find(senderId) != m_filterIdMap.end())
+      if (m_filterMap.find(senderId) != m_filterMap.end())
       {
-        CGUIRadioButtonControl *filterCtrl = m_filterIdMap[senderId];
-        CFileItemPtr item = m_itemIdMap[senderId];
-        if (filterCtrl->IsSelected())
-          m_filter->AddCurrentValue(item->GetProperty("unprocessedKey").asString());
-        else
-          m_filter->RemoveCurrentValue(item->GetProperty("unprocessedKey").asString());
+        CGUIRadioButtonControl *filterCtrl = m_filterMap[senderId].second;
+        PlexStringPair filterKv = m_filterMap[senderId].first;
+        m_filter->setSelected(filterKv.first, filterCtrl->IsSelected());
 
-        if (m_helper)
-          m_helper->ApplyFilterFromDialog(m_filter);
+        if (m_clearFilters)
+          m_clearFilters->SetVisible(m_filter->isSelected());
 
-        CGUIMessage msg(GUI_MSG_UPDATE_FILTERS, GetID(), m_helper->GetWindowID());
-        g_windowManager.SendThreadMessage(msg);
+        CGUIMessage msg(GUI_MSG_FILTER_SELECTED, WINDOW_DIALOG_FILTER_SORT, 0, m_filterButtonId, 0);
+        msg.SetStringParam(m_filter->getFilterKey());
+        g_windowManager.SendThreadMessage(msg, g_windowManager.GetActiveWindow());
+
+        SetInvalid();
+        return true;
+      }
+      else if (senderId == 99)
+      {
+        OnAction(CAction(ACTION_CLEAR_FILTERS));
+        return true;
       }
     }
 
   }
   return CGUIDialog::OnMessage(message);
-}
-
-void CGUIDialogFilterSort::DoModal(int iWindowID, const CStdString &param)
-{
-  CGUIDialog::DoModal(iWindowID, param);
 }

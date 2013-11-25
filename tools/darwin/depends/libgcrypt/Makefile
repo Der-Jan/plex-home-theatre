@@ -10,6 +10,10 @@ ARCHIVE=$(SOURCE).tar.bz2
 export PATH:=$(TOOLCHAIN)/bin:$(PATH) 
 CONFIGURE=./configure --prefix=$(PREFIX)
 
+ifeq ($(DARWIN),osx)
+CONFIGURE+=--disable-asm
+endif
+
 LIBDYLIB=$(SOURCE)/.libs/libgcrypt.dylib
 
 CLEAN_FILES=$(ARCHIVE) $(SOURCE)
@@ -24,7 +28,7 @@ $(SOURCE): $(TARBALLS_LOCATION)/$(ARCHIVE)
 	$(ARCHIVE_TOOL) $(ARCHIVE_TOOL_FLAGS) $(TARBALLS_LOCATION)/$(ARCHIVE)
 	echo $(SOURCE) > .gitignore
 	cd $(SOURCE); autoreconf -vif
-	cd $(SOURCE); patch -p0 < ../01-static-mpi_mpi-internal.patch
+	cd $(SOURCE); patch -p1 < ../01-inline-gcc.patch
 	cd $(SOURCE); patch -p0 < ../02-armasm.patch
 	cd $(SOURCE); $(CONFIGURE)
 

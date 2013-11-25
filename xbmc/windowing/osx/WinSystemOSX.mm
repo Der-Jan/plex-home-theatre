@@ -44,7 +44,6 @@
 #include "osx/DarwinUtils.h"
 
 /* PLEX */
-#undef BOOL
 static BOOL displaysBlanked = NO;
 /* END PLEX */
 
@@ -688,7 +687,40 @@ bool CWinSystemOSX::DestroyWindow()
   return true;
 }
 
+bool isMavericks()
+{
+  static int isMavericks = -1;
+
+  // there is no NSAppKitVersionNumber10_9 out there anywhere
+  // so we detect mavericks by one of these newly added app nap
+  // methods - and fix the ugly mouse rect problem which was hitting
+  // us when mavericks came out
+  if (isMavericks == -1)
+  {
+    CLog::Log(LOGDEBUG, "Detected Mavericks - enable windowing fixups.");
+    isMavericks = [NSProcessInfo instancesRespondToSelector:@selector(beginActivityWithOptions:reason:)] == TRUE ? 1 : 0;
+  }
+  return isMavericks == 1;
+}
+
 extern "C" void SDL_SetWidthHeight(int w, int h);
+bool CWinSystemOSX::ResizeWindowInternal(int newWidth, int newHeight, int newLeft, int newTop, void *additional)
+{
+  bool ret = ResizeWindow(newWidth, newHeight, newLeft, newTop);
+
+  if( isMavericks() )
+  {
+    NSView * last_view = (NSView *)additional;
+    if (last_view && [last_view window])
+    {
+      NSWindow* lastWindow = [last_view window];
+      [lastWindow setContentSize:NSMakeSize(m_nWidth, m_nHeight)];
+      [lastWindow update];
+      [last_view setFrameSize:NSMakeSize(m_nWidth, m_nHeight)];
+    }
+  }
+  return ret;
+}
 bool CWinSystemOSX::ResizeWindow(int newWidth, int newHeight, int newLeft, int newTop)
 {
   if (!m_glContext)
@@ -735,6 +767,7 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
   static NSView* last_view = NULL;
   static NSSize last_view_size;
   static NSPoint last_view_origin;
+  static NSInteger last_window_level = NSNormalWindowLevel;
   bool was_fullscreen = m_bFullScreen;
   static int lastDisplayNr = res.iScreen;
   NSOpenGLContext* cur_context;
@@ -804,6 +837,7 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
     last_view_origin = [last_view frame].origin;
     last_window_screen = [[last_view window] screen];
     last_window_origin = [[last_view window] frame].origin;
+    last_window_level = [[last_view window] level];
 
     if (g_guiSettings.GetBool("videoscreen.fakefullscreen"))
     {
@@ -848,7 +882,7 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
       [newContext setView:blankView];
 
       // Hide the menu bar.
-      if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay)
+      if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay || isMavericks() )
         SetMenuBarVisible(false);
 
       // Blank other displays if requested.
@@ -882,7 +916,7 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
         CGDisplayCapture(GetDisplayID(res.iScreen));
 
       // If we don't hide menu bar, it will get events and interrupt the program.
-      if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay)
+      if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay || isMavericks() )
         SetMenuBarVisible(false);
     }
 
@@ -910,13 +944,13 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
     [NSCursor unhide];
 
     // Show menubar.
-    if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay)
+    if (GetDisplayID(res.iScreen) == kCGDirectMainDisplay || isMavericks() )
       SetMenuBarVisible(true);
 
     if (g_guiSettings.GetBool("videoscreen.fakefullscreen"))
     {
       // restore the windowed window level
-      [[last_view window] setLevel:NSNormalWindowLevel];
+      [[last_view window] setLevel:last_window_level];
 
       // Get rid of the new window we created.
       if (windowedFullScreenwindow != NULL)
@@ -969,7 +1003,7 @@ bool CWinSystemOSX::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bool bl
 
   ShowHideNSWindow([last_view window], needtoshowme);
   // need to make sure SDL tracks any window size changes
-  ResizeWindow(m_nWidth, m_nHeight, -1, -1);
+  ResizeWindowInternal(m_nWidth, m_nHeight, -1, -1, last_view);
 
   return true;
 }
@@ -1387,7 +1421,7 @@ bool CWinSystemOSX::IsObscured(void)
         if (!obscureLogged)
         {
           std::string appName;
-          if (DarwinCFStringRefToString(ownerName, appName))
+          if (DarwinCFStringRefToUTF8String(ownerName, appName))
             CLog::Log(LOGDEBUG, "WinSystemOSX: Fullscreen window %s obscures XBMC!", appName.c_str());
           obscureLogged = true;
         }
@@ -1446,7 +1480,7 @@ void CWinSystemOSX::NotifyAppFocusChange(bool bGaining)
           // find the screenID
           NSDictionary* screenInfo = [[window screen] deviceDescription];
           NSNumber* screenID = [screenInfo objectForKey:@"NSScreenNumber"];
-          if ((CGDirectDisplayID)[screenID longValue] == kCGDirectMainDisplay)
+          if ((CGDirectDisplayID)[screenID longValue] == kCGDirectMainDisplay || isMavericks() )
           {
             SetMenuBarVisible(false);
           }
@@ -1511,6 +1545,7 @@ void CWinSystemOSX::EnableSystemScreenSaver(bool bEnable)
       IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep,
         kIOPMAssertionLevelOn, reasonForActivity, &assertionID);
     }
+    UpdateSystemActivity(UsrActivity);
   }
   else if (assertionID != 0)
   {

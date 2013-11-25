@@ -29,6 +29,7 @@
 #include "threads/SystemClock.h"
 
 class CDVDDemuxFFmpeg;
+class CURL;
 
 class CDemuxStreamVideoFFmpeg
   : public CDemuxStreamVideo
@@ -111,6 +112,7 @@ public:
   bool Aborted();
 
   AVFormatContext* m_pFormatContext;
+  CDVDInputStream* m_pInput;
 
   /* PLEX */
   int GetStreamBitrate();
@@ -125,6 +127,7 @@ protected:
   int ReadFrame(AVPacket *packet);
   void AddStream(int iId);
 
+  AVDictionary *GetFFMpegOptionsFromURL(const CURL &url);
   double ConvertTimestamp(int64_t pts, int den, int num);
   void UpdateCurrentPTS();
 
@@ -145,6 +148,5 @@ protected:
   unsigned m_program;
   XbmcThreads::EndTime  m_timeout;
 
-  CDVDInputStream* m_pInput;
 };
 

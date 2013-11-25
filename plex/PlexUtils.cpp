@@ -6,6 +6,8 @@
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
 
+#include "Utility/sha1.hpp"
+
 #include "PlexUtils.h"
 #include "File.h"
 #include "URIUtils.h"
@@ -14,6 +16,16 @@
 #include "TextureCache.h"
 
 #include "SystemInfo.h"
+
+#include "utils/StringUtils.h"
+#include "addons/Skin.h"
+#include "Client/PlexMediaServerClient.h"
+#include "PlexApplication.h"
+#include "GUIWindowManager.h"
+#include "Key.h"
+#include "GUI/GUIPlexMediaWindow.h"
+
+#include "File.h"
 
 #ifdef TARGET_DARWIN_OSX
 #include <CoreServices/CoreServices.h>
@@ -26,6 +38,27 @@
 using namespace std;
 using namespace boost;
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool PlexUtils::IsLocalNetworkIP(const CStdString &host)
+{
+  bool isLocal = false;
+  if (starts_with(host, "10.") || starts_with(host, "192.168.") || starts_with(host, "127.0.0.1"))
+  {
+    isLocal = true;
+  }
+  else if (starts_with(host, "172."))
+  {
+    vector<string> elems = StringUtils::Split(host, ".");
+    if (elems.size() == 4)
+    {
+      int secondOct = lexical_cast<int>(elems[1]);
+      if (secondOct >= 16 && secondOct <= 31)
+        isLocal = true;
+    }
+  }
+  return isLocal;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 std::string PlexUtils::CacheImageUrl(const string &url)
@@ -61,6 +94,16 @@ int64_t PlexUtils::Size(const CStdString& strFileName)
   if (XFILE::CFile::Stat(strFileName, &buffer) == 0)
     return buffer.st_size;
   return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void PlexUtils::AppendPathToURL(CURL& baseURL, const string& relativePath)
+{
+  string filename = baseURL.GetFileName();
+  if (boost::ends_with(filename, "/") == false)
+    filename += "/";
+  filename += relativePath;
+  baseURL.SetFileName(filename);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -141,7 +184,7 @@ string PlexUtils::GetHostName()
 bool PlexUtils::IsPlexMediaServer(const CStdString& strFile)
 {
   CURL url(strFile);
-  if (url.GetProtocol() == "plex" || url.GetPort() == 32400 || url.GetOptions().find("X-Plex-Token") != -1)
+  if (url.GetProtocol() == "plexserver" || url.GetProtocol() == "plex")
     return true;
 
   // A stack can also come from the Plex Media Servers.
@@ -228,6 +271,147 @@ string PlexUtils::GetMachinePlatformVersion()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+std::string PlexUtils::GetStreamChannelName(CFileItemPtr item)
+{
+  int64_t channels = item->GetProperty("channels").asInteger();
+
+  if (channels == 1)
+    return "Mono";
+  else if (channels == 2)
+    return "Stereo";
+
+  return boost::lexical_cast<std::string>(channels - 1) + ".1";
+}
+
+///////////////////////////////////////////////////////////////////////////////
+std::string PlexUtils::GetStreamCodecName(CFileItemPtr item)
+{
+  std::string codec = item->GetProperty("codec").asString();
+  if (codec == "dca")
+    return "DTS";
+
+  return boost::to_upper_copy(codec);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CFileItemPtr PlexUtils::GetItemSelectedStreamOfType(const CFileItem &fileItem, int streamType)
+{
+  int selectedItem = 0;
+  if (fileItem.HasProperty("selectedMediaItem"))
+    selectedItem = fileItem.GetProperty("selectedMediaItem").asInteger();
+
+  if (fileItem.m_mediaItems.size() == 0 ||
+      fileItem.m_mediaItems.size() < selectedItem)
+    return CFileItemPtr();
+
+  CFileItemPtr item = fileItem.m_mediaItems[selectedItem];
+
+  if (!item)
+    return CFileItemPtr();
+
+  CFileItemPtr part;
+  if (item->m_mediaParts.size() > 0)
+    part = item->m_mediaParts[0];
+
+  if (part)
+    return GetSelectedStreamOfType(part, streamType);
+
+  return CFileItemPtr();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+CFileItemPtr PlexUtils::GetSelectedStreamOfType(CFileItemPtr mediaPart, int streamType)
+{
+  BOOST_FOREACH(CFileItemPtr stream, mediaPart->m_mediaPartStreams)
+  {
+    int64_t _streamType = stream->GetProperty("streamType").asInteger();
+    bool selected = stream->IsSelected();
+    if (_streamType == streamType && selected)
+      return stream;
+  }
+
+  return CFileItemPtr();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+bool PlexUtils::PlexMediaStreamCompare(CFileItemPtr stream1, CFileItemPtr stream2)
+{
+  if (stream1->GetProperty("streamType").asInteger() == stream2->GetProperty("streamType").asInteger() &&
+      stream1->GetProperty("language").asString() == stream2->GetProperty("language").asString() &&
+      stream1->GetProperty("codec").asString() == stream2->GetProperty("codec").asString() &&
+      stream1->GetProperty("index").asInteger() == stream2->GetProperty("index").asInteger() &&
+      stream1->GetProperty("channels").asInteger() == stream2->GetProperty("channels").asInteger())
+    return true;
+  return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CFileItemPtr PlexUtils::GetStreamByID(CFileItemPtr item, int streamType, int plexStreamID)
+{
+  BOOST_FOREACH(CFileItemPtr it, item->m_mediaItems)
+  {
+    BOOST_FOREACH(CFileItemPtr part, it->m_mediaParts)
+    {
+      BOOST_FOREACH(CFileItemPtr stream, part->m_mediaPartStreams)
+      {
+        if (stream->GetProperty("streamType").asInteger() == streamType &&
+            stream->GetProperty("id").asInteger() == plexStreamID)
+        {
+          return stream;
+        }
+      }
+    }
+  }
+  return CFileItemPtr();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void PlexUtils::SetSelectedStream(CFileItemPtr item, CFileItemPtr stream)
+{
+  BOOST_FOREACH(CFileItemPtr item, item->m_mediaItems)
+  {
+    BOOST_FOREACH(CFileItemPtr part, item->m_mediaParts)
+    {
+      if (stream->GetProperty("streamType").asInteger() == PLEX_STREAM_SUBTITLE &&
+          stream->GetProperty("id").asInteger() == 0)
+      {
+        /* this means we reset the stream back to none */
+        stream->Select(true);
+        g_plexApplication.mediaServerClient->SelectStream(item, part->GetProperty("id").asInteger(), 0, -1);
+      }
+      
+      BOOST_FOREACH(CFileItemPtr str, part->m_mediaPartStreams)
+      {
+        if (PlexMediaStreamCompare(stream, str))
+        {
+          int subId = -1;
+          int audioId = -1;
+          if (str->GetProperty("streamType").asInteger() == PLEX_STREAM_AUDIO)
+            audioId = str->GetProperty("id").asInteger();
+          else if (str->GetProperty("streamType").asInteger() == PLEX_STREAM_SUBTITLE)
+            subId = str->GetProperty("id").asInteger();
+          
+          g_plexApplication.mediaServerClient->SelectStream(item, part->GetProperty("id").asInteger(), subId, audioId);
+          
+          str->Select(true);
+          str->SetProperty("select", true);
+        }
+        else if (stream->GetProperty("streamType").asInteger() == str->GetProperty("streamType").asInteger())
+        {
+          str->Select(false);
+          str->SetProperty("select", false);
+        }
+      }
+    }
+  }
+  
+  if (stream->GetProperty("streamType").asInteger() == PLEX_STREAM_AUDIO)
+    item->SetProperty("selectedAudioStream", GetPrettyStreamName(*item.get(), true));
+  else if (stream->GetProperty("streamType").asInteger() == PLEX_STREAM_SUBTITLE)
+    item->SetProperty("selectedSubtitleStream", GetPrettyStreamName(*item.get(), false));
+}
+
+///////////////////////////////////////////////////////////////////////////////
 #ifdef _WIN32
 
 int usleep(useconds_t useconds)
@@ -237,3 +421,99 @@ int usleep(useconds_t useconds)
 }
 
 #endif
+
+///////////////////////////////////////////////////////////////////////////////
+bool PlexUtils::CurrentSkinHasPreplay()
+{
+  return g_SkinInfo->HasSkinFile("PlexPreplayVideo.xml");
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+bool PlexUtils::CurrentSkinHasFilters()
+{
+return g_SkinInfo->HasSkinFile("DialogFilters.xml");}
+
+////////////////////////////////////////////////////////////////////////////////////////
+#include "filesystem/SpecialProtocol.h"
+
+std::string PlexUtils::GetPlexCrashPath()
+{
+  return CSpecialProtocol::TranslatePath("special://temp/CrashReports");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+CStdString PlexUtils::GetPrettyStreamName(const CFileItem &fileItem, bool audio)
+{
+  CFileItemPtr selectedStream;
+  int numStreams = 0;
+  
+  if (fileItem.m_mediaItems.size() < 1 || fileItem.m_mediaItems[0]->m_mediaParts.size() < 1)
+    return g_localizeStrings.Get(231);
+  
+  CFileItemPtr part = fileItem.m_mediaItems[0]->m_mediaParts[0];
+  for (int y = 0; y < part->m_mediaPartStreams.size(); y ++)
+  {
+    CFileItemPtr stream = part->m_mediaPartStreams[y];
+    int64_t streamType = stream->GetProperty("streamType").asInteger();
+    if ((audio && streamType == PLEX_STREAM_AUDIO) ||
+        (!audio && streamType == PLEX_STREAM_SUBTITLE))
+    {
+      if (stream->IsSelected())
+        selectedStream = stream;
+      
+      numStreams ++;
+    }
+  }
+  
+  CStdString name;
+  
+  if (selectedStream)
+  {
+    if (selectedStream->HasProperty("language") && !selectedStream->GetProperty("language").asString().empty())
+    {
+      name = selectedStream->GetProperty("language").asString();
+      if (selectedStream->GetProperty("streamType").asInteger() == PLEX_STREAM_AUDIO)
+        name += " (" + GetStreamCodecName(selectedStream) + " " + GetStreamChannelName(selectedStream) + ")";
+    }
+    else name = g_localizeStrings.Get(1446);
+  }
+  else
+    name = g_localizeStrings.Get(231);
+  
+  return name;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString PlexUtils::GetSHA1SumFromURL(const CURL &url)
+{
+  SHA1 sha;
+  XFILE::CFile file;
+
+  if (file.Open(url.Get()))
+  {
+    uint8_t buffer[4096];
+    int read = file.Read(buffer, 4096);
+
+    while (read != 0)
+    {
+      sha.update(buffer, read);
+      read = file.Read(buffer, 4096);
+    }
+
+    return sha.end().hex();
+  }
+
+  return "";
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString PlexUtils::GetXMLString(const CXBMCTinyXML &document)
+{
+  CXBMCTinyXML ldoc(document);
+
+  TiXmlPrinter printer;
+  printer.SetIndent("  ");
+  ldoc.Accept(&printer);
+
+  return printer.Str();
+}

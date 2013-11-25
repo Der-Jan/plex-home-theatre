@@ -21,30 +21,15 @@
  *
  */
 
-#include "video/windows/GUIWindowVideoBase.h"
+#include "GUIPlexMediaWindow.h"
 #include "PlexTypes.h"
 
-class CGUIWindowSharedContent : public CGUIWindowVideoBase
+class CGUIWindowSharedContent : public CGUIPlexMediaWindow
 {
  public:
 
   CGUIWindowSharedContent()
-    : CGUIWindowVideoBase(WINDOW_SHARED_CONTENT, "MySharedContent.xml")
+    : CGUIPlexMediaWindow(WINDOW_SHARED_CONTENT, "MySharedContent.xml")
   {
-  }
-  
-  bool OnClick(int iItem)
-  {
-    if (iItem < 0 || iItem >= (int)m_vecItems->Size()) 
-      return true;
-    
-    CFileItemPtr pItem = m_vecItems->Get(iItem);
-    string type = pItem->GetProperty("type").asString();
-    
-    CStdString strWindow = (type == "movie" || type == "show") ? "MyVideoFiles" : (type == "artist") ? "MyMusicFiles" : "MyPictures";
-    CStdString cmd = "XBMC.ActivateWindow(" + strWindow + "," + pItem->GetPath() + ",return)";
-    g_application.ExecuteXBMCAction(cmd);
-
-    return true;
-  }
+  }  
 };

@@ -30,8 +30,7 @@
 /* PLEX */
 #include "BackgroundInfoLoader.h"
 #include "FileItem.h"
-#include "PlexMediaRefresher.h"
-#include "PlexMediaServerQueue.h"
+#include "Client/PlexMediaServerClient.h"
 
 #define CONTENT_LIST_FILTERS 13000
 #define DEFAULT_MODE_FOR_DISABLED_VIEWS 65586
@@ -65,6 +64,8 @@ public:
     (*pItem) = *(updatedItem.get());
     m_updatedItem = CFileItemPtr(pItem);
   }
+
+  virtual void CheckPlexFilters(CFileItemList& list) {};
   /* END PLEX */
 
   virtual bool CanFilterAdvanced() { return m_canFilterAdvanced; }
@@ -160,13 +161,8 @@ protected:
   void OnRenameItem(int iItem);
 
   /* PLEX */
-  virtual bool OnPlayMedia(CFileItem* pItem);
-  virtual void Render();
   virtual CBackgroundInfoLoader* GetBackgroundLoader() { return 0; }
-  void RefreshShares(bool update=false);
   CFileItemPtr m_updatedItem;
-  PlexMediaRefresher* m_mediaRefresher;
-  CStopWatch m_refreshTimer;
   /* END PLEX */
 
 protected:

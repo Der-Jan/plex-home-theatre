@@ -14,16 +14,24 @@ if(TARGET_WIN32)
   list(APPEND subdirs win32)
 endif(TARGET_WIN32)
 
+if(USE_INTERNAL_FFMPEG)
+  include_directories(${FFMPEG_INCLUDE_DIRS})
+endif(USE_INTERNAL_FFMPEG)
+
 foreach(dir ${subdirs})
   add_subdirectory(${dir})
 endforeach()
 
-set(PlexOwnedFiles BackgroundInfoLoader.cpp)
+#set(PlexOwnedFiles BackgroundInfoLoader.cpp)
 
 find_all_sources(. xbmc_SRCS)
 foreach(f ${PlexOwnedFiles})
   list(REMOVE_ITEM xbmc_SRCS ./${f})
 endforeach()
+
+if(NOT ENABLE_DVD_DRIVE)
+	list(REMOVE_ITEM xbmc_SRCS ./Autorun.cpp)
+endif()
 
 get_property(ALL_SRCS GLOBAL PROPERTY SRCS_LIST)
 

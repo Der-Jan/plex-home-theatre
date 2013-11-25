@@ -39,7 +39,7 @@
     <keyboard>
       <p>Play</p>
       <q>Queue</q>
-      <f>FastForward</f>
+      <f>ClearFilters</f>
       <r>Rewind</r>
       <left>Left</left>
       <right>Right</right>
@@ -164,6 +164,7 @@
     <keyboard>
       <i>info</i>
       <end mod="ctrl">XBMC.ShutDown()</end>
+      <space>Play</space>
     </keyboard>
   </Home>
   <VirtualKeyboard>
@@ -265,7 +266,6 @@
       <closesquarebracket>BigStepForward</closesquarebracket>
       <return>Pause</return>
       <i>CodecInfo</i>
-      <t>Info</t>
       <o>ShowTime</o>
       <s>ShowSubtitles</s>
       <s mod="ctrl">SubtitleAlign</s>
@@ -468,6 +468,7 @@
       <delete>Delete</delete>
       <space>Playlist</space>
       <w>ToggleWatched</w>
+      <f>ClearFilters</f>
     </keyboard>
   </MyVideoLibrary>
   <MyVideoFiles>
@@ -616,6 +617,10 @@
       <escape>fullscreen</escape>
 		</keyboard>
 	</NowPlaying>
+
+  <FilterDialog>
+    <f>ClearFilters</f>
+  </FilterDialog>
   <PlexSearch>
     <keyboard>
       <escape>PreviousMenu</escape>

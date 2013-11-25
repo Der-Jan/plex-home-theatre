@@ -318,6 +318,7 @@ bool CxImageTIF::Decode(CxFile * hFile)
 
 			if (info.nEscape){ // <vho> - cancel decoding
 				free(bits);
+				free(row_shifts);
 				cx_throw("Cancelled");
 			}
 
@@ -334,6 +335,7 @@ bool CxImageTIF::Decode(CxFile * hFile)
 					if (TIFFReadTile(m_tif, tilebuf, col, ys, 0, 0) < 0){
 						free(tilebuf);
 						free(bits);
+						free(row_shifts);
 						cx_throw("Corrupted tiled TIFF file!");
 					}
 

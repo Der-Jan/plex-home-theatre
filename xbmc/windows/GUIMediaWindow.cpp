@@ -77,8 +77,10 @@
 #include "filesystem/DirectoryCache.h"
 #include "GUI/GUIDialogRating.h"
 #include "dialogs/GUIDialogCache.h"
-#include "PlexSourceScanner.h"
 #include "guilib/GUIKeyboardFactory.h"
+#include "filesystem/CurlFile.h"
+#include "Client/PlexServerManager.h"
+#include "plex/PlexApplication.h"
 /* END PLEX */
 
 #define CONTROL_BTNVIEWASICONS       2
@@ -95,6 +97,10 @@
 using namespace std;
 using namespace ADDON;
 
+/* PLEX */
+using namespace XFILE;
+/* END PLEX */
+
 CGUIMediaWindow::CGUIMediaWindow(int id, const char *xmlFile)
     : CGUIWindow(id, xmlFile)
 {
@@ -106,20 +112,11 @@ CGUIMediaWindow::CGUIMediaWindow(int id, const char *xmlFile)
   m_iSelectedItem = -1;
   m_canFilterAdvanced = false;
 
-  /* PLEX */
-  m_mediaRefresher = NULL;
-  /* END PLEX */
-
   m_guiState.reset(CGUIViewState::GetViewState(GetID(), *m_vecItems));
 }
 
 CGUIMediaWindow::~CGUIMediaWindow()
 {
-  /* PLEX */
-  if (m_mediaRefresher)
-    m_mediaRefresher->die();
-  /* END PLEX */
-
   delete m_vecItems;
   delete m_unfilteredItems;
 }
@@ -255,17 +252,6 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
       m_iSelectedItem = m_viewControl.GetSelectedItem();
       m_iLastControl = GetFocusedControlID();
 
-      /* PLEX */
-      if (m_refreshTimer.IsRunning())
-        m_refreshTimer.Stop();
-
-      if (m_mediaRefresher)
-      {
-        m_mediaRefresher->die();
-        m_mediaRefresher = NULL;
-      }
-      /* END PLEX */
-
       CGUIWindow::OnMessage(message);
       CGUIDialogContextMenu* pDlg = (CGUIDialogContextMenu*)g_windowManager.GetWindow(WINDOW_DIALOG_CONTEXT_MENU);
       if (pDlg && pDlg->IsActive())
@@ -345,17 +331,6 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
           return true;
         }
       }
-      /* PLEX */
-      else if (iControl == CONTENT_LIST_FILTERS)
-      {
-        // See what filter was selected and execute it.
-        CGUIBaseContainer* control = (CGUIBaseContainer* )GetControl(CONTENT_LIST_FILTERS);
-
-        int selected = control->GetSelectedItem();
-        CFileItemPtr filterItem = CPlexDirectory::GetFilterList()->Get(selected);
-        Update(filterItem->GetPath());
-      }
-      /* END PLEX */
     }
     break;
 
@@ -410,6 +385,8 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
       /* PLEX */
 
       { // State of the sources changed, so update our view
+#ifndef __PLEX__
+
         if ((m_vecItems->IsVirtualDirectoryRoot() ||
              m_vecItems->IsSourcesPath()) && IsActive())
         {
@@ -417,6 +394,7 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
           Refresh();
           m_viewControl.SetSelectedItem(iItem);
         }
+#endif
         RefreshShares(true);
         return true;
       
@@ -427,7 +405,6 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
         RefreshShares(true);
         return true;
       }
-      /* END PLEX */
 
       else if (message.GetParam1()==GUI_MSG_UPDATE && IsActive())
       {
@@ -523,11 +500,10 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
 #endif
 
       /* PLEX */
-      PlexMediaServerQueue::Get().onViewModeChanged(m_vecItems->GetProperty("identifier").asString(),
-                                                    m_vecItems->GetPath(),
-                                                    m_vecItems->GetProperty("viewGroup").asString(),
-                                                    viewMode, -1, -1);
-      m_vecItems->SetDefaultViewMode(viewMode);
+      g_plexApplication.mediaServerClient->SetViewMode(CFileItemPtr(new CFileItem(*m_vecItems)), viewMode);
+      CLog::Log(LOGDEBUG, "CGUIMediaWindow::OnMessage updating viewMode to %d", viewMode);
+      m_vecItems->SetProperty("viewMode", viewMode);
+      g_directoryCache.ClearDirectory(m_vecItems->GetPath());
       /* END PLEX */
 
       UpdateButtons();
@@ -564,12 +540,18 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
       bool returning = ret.CompareNoCase("return") == 0;
       if (!dir.IsEmpty())
       {
+        CLog::Log(LOGDEBUG, "CGUImediaWindow::onmessage got %s from message", dir.c_str());
         m_history.ClearPathHistory();
         // ensure our directory is valid
         dir = GetStartFolder(dir);
         if (!returning || m_vecItems->GetPath().Left(dir.GetLength()) != dir)
         { // we're not returning to the same path, so set our directory to the requested path
+          CLog::Log(LOGDEBUG, "CGUImediaWindow::onmessage setting %s as path", dir.c_str());
           m_vecItems->SetPath(dir);
+        }
+        else
+        {
+          CLog::Log(LOGDEBUG, "CGUImediaWindow::onmessage returning: %d %s = %s", (int)returning, m_vecItems->GetPath().Left(dir.GetLength()).c_str(), dir.c_str());
         }
         // check for network up
         if (URIUtils::IsRemote(m_vecItems->GetPath()) && !WaitForNetwork())
@@ -578,7 +560,11 @@ bool CGUIMediaWindow::OnMessage(CGUIMessage& message)
       }
       if (message.GetParam1() != WINDOW_INVALID)
       { // first time to this window - make sure we set the root path
+#ifndef __PLEX__
         m_startDirectory = returning ? dir : "";
+#else
+        m_startDirectory = dir;
+#endif
       }
     }
     break;
@@ -619,22 +605,12 @@ void CGUIMediaWindow::UpdateButtons()
     m_viewControl.SetCurrentView(m_guiState->GetViewAsControl());
 #endif
     /* PLEX */
-    bool allowChange = true;
-
-    int viewMode = m_guiState->GetViewAsControl();
-
-    // Check the list of disabled view modes for this directory
-    CStdStringArray viewModes;
-    StringUtils::SplitString(CurrentDirectory().GetDisabledViewModes(), ",", viewModes);
-    for (unsigned int i = 0; i < viewModes.size(); i++)
-    {
-      if (atoi(viewModes[i]) == viewMode)
-        allowChange = false;
-    }
-
     // If we have a default view mode, use that instead
-    if (CurrentDirectory().GetDefaultViewMode() > 0)
-      m_viewControl.SetCurrentView(CurrentDirectory().GetDefaultViewMode());
+    if (CurrentDirectory().HasProperty("viewMode"))
+    {
+      CLog::Log(LOGDEBUG, "CGUIMediaWindow::UpdateButtons setting viewMode to %lld", CurrentDirectory().GetProperty("viewMode").asInteger());
+      m_viewControl.SetCurrentView(CurrentDirectory().GetProperty("viewMode").asInteger());
+    }
 
     // Otherwise, use the global default
     else
@@ -664,24 +640,12 @@ void CGUIMediaWindow::UpdateButtons()
     SET_CONTROL_LABEL2(CONTROL_BTN_FILTER, GetProperty("filter").asString());
 }
 
-#ifndef __PLEX__
 void CGUIMediaWindow::ClearFileItems()
 {
   m_viewControl.Clear();
   m_vecItems->Clear();
   m_unfilteredItems->Clear();
 }
-#else
-void CGUIMediaWindow::ClearFileItems()
-{
-  m_viewControl.Clear();
-  int defaultViewMode = m_vecItems->GetDefaultViewMode();
-  m_vecItems->Clear(); // will clean up everything
-  m_vecItems->SetDefaultViewMode(defaultViewMode);
-
-  m_unfilteredItems->Clear();
-}
-#endif
 
 // \brief Sorts Fileitems based on the sort method and sort oder provided by guiViewState
 void CGUIMediaWindow::SortItems(CFileItemList &items)
@@ -803,6 +767,13 @@ bool CGUIMediaWindow::GetDirectory(const CStdString &strDirectory, CFileItemList
       m_history.RemoveParentPath();
   }
 
+  /* PLEX */
+  if (items.GetPlexDirectoryType() == PLEX_DIR_TYPE_MESSAGE)
+  {
+    CGUIDialogOK::ShowAndGetInput(items.GetProperty("header"), "", items.GetProperty("message"), "");
+    return false;
+  }
+  /* END PLEX */
 
 
   if (m_guiState.get() && !m_guiState->HideParentDirItems() && !items.GetPath().IsEmpty())
@@ -852,10 +823,6 @@ bool CGUIMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPa
   if (strDirectory == "?")
     return false;
 
-  /* PLEX */
-  RefreshShares();
-  /* END PLEX */
-
   // get selected item
   int iItem = m_viewControl.GetSelectedItem();
   CStdString strSelectedItem = "";
@@ -885,6 +852,7 @@ bool CGUIMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPa
 
   CFileItemList items;
 
+#ifndef __PLEX__
   /* PLEX */
   // Save the default view mode.
   if (strDirectory == strCurrentDirectory)
@@ -932,35 +900,15 @@ bool CGUIMediaWindow::Update(const CStdString &strDirectory, bool updateFilterPa
     return false;
   }
 
+  CheckPlexFilters(items);
+
   if (items.GetLabel().IsEmpty())
     items.SetLabel(CUtil::GetTitleFromPath(items.GetPath(), true));
   
   ClearFileItems();
   m_vecItems->Copy(items);
-
-  /* PLEX */
-  // Double check and see if we need to update.
-  if (m_updatedItem &&
-      m_vecItems->Get(m_iSelectedItem) &&
-      m_updatedItem->GetProperty("ratingKey").size() > 0 &&
-      m_updatedItem->GetProperty("ratingKey") == m_vecItems->Get(m_iSelectedItem)->GetProperty("ratingKey"))
-  {
-    // Update resume time and view count.
-    CFileItemPtr item = m_vecItems->Get(m_iSelectedItem);
-    if (m_updatedItem->HasProperty("viewOffset"))
-      item->SetProperty("viewOffset", m_updatedItem->GetProperty("viewOffset"));
-    else
-      item->ClearProperty("viewOffset");
-
-    // Play count.
-    item->GetVideoInfoTag()->m_playCount = m_updatedItem->GetVideoInfoTag()->m_playCount;
-
-    // Icon.
-    item->SetOverlayImage((CGUIListItem::GUIIconOverlay)m_updatedItem->GetOverlayImageID());
-
-    m_updatedItem = CFileItemPtr();
-  }
-  /* END PLEX */
+  CLog::Log(LOGDEBUG, "CGUIMediaWindow::Update viewMode = %lld %s", items.GetProperty("viewMode").asInteger(), items.GetPath().c_str());
+  m_vecItems->SetProperty("viewMode", items.GetProperty("viewMode"));
 
   // only set the filter path if it hasn't been marked
   // as preset or if it's empty
@@ -1144,20 +1092,6 @@ void CGUIMediaWindow::OnCacheFileItems(CFileItemList &items)
 // to modify the fileitems. Eg. to modify the item label
 void CGUIMediaWindow::OnFinalizeFileItems(CFileItemList &items)
 {
-
-  /* PLEX */
-  // Check whether the refresh timer is required
-  if (m_vecItems->GetAutoRefresh() > 0)
-  {
-    if (!m_refreshTimer.IsRunning())
-      m_refreshTimer.StartZero();
-  }
-  else
-  {
-    if (m_refreshTimer.IsRunning())
-      m_refreshTimer.Stop();
-  }
-  /* END PLEX */
 }
 
 // \brief With this function you can react on a users click in the list/thumb panel.
@@ -1252,78 +1186,6 @@ bool CGUIMediaWindow::OnClick(int iItem)
     }
 
     CFileItem directory(*pItem);
-
-    /* PLEX */
-    // Show on-screen keyboard for PMS search queries
-    if (pItem->IsSearchDir())
-    {
-      CStdString strSearchTerm = "";
-      if (CGUIKeyboardFactory::ShowAndGetInput(strSearchTerm, pItem->GetSearchPrompt(), false))
-      {
-        // Encode the query.
-        CURL::Encode(strSearchTerm);
-
-        // Find the ? if there is one.
-        CStdString newURL = directory.GetPath();
-        URIUtils::RemoveSlashAtEnd(newURL);
-
-        newURL += (newURL.Find("?") > 0) ? "&" : "?";
-        newURL += "query=" + strSearchTerm;
-        directory.SetPath(newURL);
-      }
-      else
-      {
-        // If no query was entered or the user dismissed the keyboard, do nothing
-        return true;
-      }
-    }
-
-    // Show a context menu for PMS popup directories
-    if (pItem->IsPopupMenuItem())
-    {
-      CFileItemList fileItems;
-      CContextButtons buttons;
-      CPlexDirectory plexDir;
-
-      plexDir.GetDirectory(directory.GetPath(), fileItems);
-      for ( int i = 0; i < fileItems.Size(); i++ )
-      {
-        CFileItemPtr item = fileItems.Get(i);
-        buttons.Add(i, item->GetLabel());
-      }
-
-      int choice = CGUIDialogContextMenu::ShowAndGetChoice(buttons);
-      if (choice >= 0)
-      {
-        CFileItemPtr selectedItem = fileItems.Get(choice);
-        if (selectedItem->m_bIsFolder)
-        {
-          Update(selectedItem->GetPath());
-        }
-        else
-        {
-          selectedItem->SetLabel(pItem->GetLabel() + ": " + selectedItem->GetLabel());
-          OnPlayMedia(selectedItem.get());
-        }
-      }
-      return true;
-    }
-
-    // Show preferences.
-    if (pItem->IsSettingsDir())
-    {
-      CFileItemList fileItems;
-      vector<CStdString> items;
-      CPlexDirectory plexDir(false);
-
-      plexDir.GetDirectory(directory.GetPath(), fileItems);
-      CGUIDialogPlexPluginSettings::ShowAndGetInput(pItem->GetPath(), plexDir.GetData());
-
-      Update(m_vecItems->GetPath());
-      return true;
-    }
-    /* END PLEX */
-
     if (!Update(directory.GetPath()))
       ShowShareErrorMessage(&directory);
 
@@ -1385,7 +1247,7 @@ bool CGUIMediaWindow::OnClick(int iItem)
       }
     }
 
-    if (autoplay && !g_partyModeManager.IsEnabled() && 
+    if (autoplay && !g_partyModeManager.IsEnabled() &&
         !pItem->IsPlayList() && !do_not_add_karaoke)
     {
       return OnPlayAndQueueMedia(pItem);
@@ -1568,6 +1430,7 @@ void CGUIMediaWindow::SetHistoryForPath(const CStdString& strDirectory)
   SetupShares();
   if (!strDirectory.IsEmpty())
   {
+#ifndef __PLEX__
     // Build the directory history for default path
     CStdString strPath, strParentPath;
     strPath = strDirectory;
@@ -1612,6 +1475,9 @@ void CGUIMediaWindow::SetHistoryForPath(const CStdString& strDirectory)
       strPath = strParentPath;
       URIUtils::RemoveSlashAtEnd(strPath);
     }
+#else
+    m_history.AddPath(strDirectory);
+#endif
   }
   else
     m_history.ClearPathHistory();
@@ -1624,18 +1490,11 @@ void CGUIMediaWindow::SetHistoryForPath(const CStdString& strDirectory)
 // This function is called by OnClick()
 bool CGUIMediaWindow::OnPlayMedia(int iItem)
 {
-  return OnPlayMedia(m_vecItems->Get(iItem).get());
-}
-
-bool CGUIMediaWindow::OnPlayMedia(CFileItem* pItem)
-{
   // Reset Playlistplayer, playback started now does
   // not use the playlistplayer.
   g_playlistPlayer.Reset();
   g_playlistPlayer.SetCurrentPlaylist(PLAYLIST_NONE);
-#ifndef __PLEX__
   CFileItemPtr pItem=m_vecItems->Get(iItem);
-#endif
 
   CLog::Log(LOGDEBUG, "%s %s", __FUNCTION__, pItem->GetPath().c_str());
 
@@ -1769,24 +1628,9 @@ void CGUIMediaWindow::OnDeleteItem(int iItem)
   // Confirm.
   if (!CGUIDialogYesNo::ShowAndGetInput(122, 125, 0, 0))
     return;
+  
+  g_plexApplication.mediaServerClient->deleteItem(item);
 
-  // Delete.
-  CStdString strData;
-  CCurlFile http;
-  bool status = http.Delete(item->GetProperty("key").asString(), strData);
-
-  if (status == false)
-  {
-    // Show error.
-    CGUIDialogOK::ShowAndGetInput(257, 16205, 0, 0);
-  }
-  else
-  {
-    // Refresh.
-    g_directoryCache.ClearDirectory(m_vecItems->GetPath());
-    Update(m_vecItems->GetPath());
-    m_viewControl.SetSelectedItem(iItem);
-  }
 }
 #endif
 
@@ -1869,20 +1713,6 @@ void CGUIMediaWindow::GetContextButtons(int itemNumber, CContextButtons &buttons
   if (!item)
     return;
 
-  /* PLEX */
-  // add rating options
-  if (item->HasProperty("ratingKey") && item->HasProperty("pluginIdentifier") && (item->IsRemoteSharedPlexMediaServerLibrary() == false))
-    buttons.Add(CONTEXT_BUTTON_RATING, item->HasProperty("userRating") ? 40206 : 40205);
-
-  if (item->IsPlexMediaServerLibrary() &&
-      (item->IsRemoteSharedPlexMediaServerLibrary() == false) &&
-      (item->GetProperty("type") == "episode" || item->GetProperty("type") == "movie" ||
-       item->GetProperty("type") == "track"   || item->GetProperty("type") == "photo"))
-  {
-    buttons.Add(CONTEXT_BUTTON_DELETE, 15015);
-  }
-  /* END PLEX */
-
   // user added buttons
   CStdString label;
   CStdString action;
@@ -1912,6 +1742,10 @@ void CGUIMediaWindow::GetContextButtons(int itemNumber, CContextButtons &buttons
     else
       buttons.Add(CONTEXT_BUTTON_ADD_FAVOURITE, 14076);     // Add To Favourites;
   }
+#endif
+  /* PLEX */
+  buttons.Add(CONTEXT_BUTTON_NOW_PLAYING, 13350);
+  /* END PLEX */
 
 }
 
@@ -1956,30 +1790,6 @@ bool CGUIMediaWindow::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
       CApplicationMessenger::Get().ExecBuiltIn(m_vecItems->Get(itemNumber)->GetProperty(action).asString());
       return true;
     }
-  /* PLEX */
-  case CONTEXT_BUTTON_DELETE:
-  {
-    OnDeleteItem(itemNumber);
-    return true;
-  }
-  case CONTEXT_BUTTON_RATING:
-  {
-    CFileItemPtr item = m_vecItems->Get(itemNumber);
-
-    bool hasUserRating = item->HasProperty("userRating");
-    int newRating = CGUIDialogRating::ShowAndGetInput(hasUserRating ? 40208 : 40207,
-                                                      item->GetVideoInfoTag()->m_strTitle,
-                                                      hasUserRating? item->GetProperty("userRating").asInteger() : (int)item->GetVideoInfoTag()->m_fRating);
-
-    if (newRating >= 0 && newRating <= 10)
-    {
-      PlexMediaServerQueue::Get().onRate(item, float(newRating));
-      item->SetProperty("userRating", newRating);
-    }
-
-    return true;
-  }
-  /* END PLEX */
   default:
     break;
   }
@@ -1993,6 +1803,7 @@ const CGUIViewState *CGUIMediaWindow::GetViewState() const
 
 const CFileItemList& CGUIMediaWindow::CurrentDirectory() const
 {
+  CFileItemPtr item = m_vecItems->Get(0);
 
   return *m_vecItems;
 }
@@ -2116,6 +1927,7 @@ void CGUIMediaWindow::OnFilterItems(const CStdString &filter)
   // The idea here is to ensure we have something to focus if our file list
   // is empty.  As such, this check MUST be last and ignore the hide parent
   // fileitems settings.
+#ifndef __PLEX__
   if (m_vecItems->IsEmpty())
   {
     CFileItemPtr pItem(new CFileItem(".."));
@@ -2124,6 +1936,7 @@ void CGUIMediaWindow::OnFilterItems(const CStdString &filter)
     pItem->m_bIsShareOrDrive = false;
     m_vecItems->AddFront(pItem, 0);
   }
+#endif
 
   // and update our view control + buttons
   m_viewControl.SetItems(*m_vecItems);
@@ -2295,63 +2108,3 @@ CStdString CGUIMediaWindow::RemoveParameterFromPath(const CStdString &strDirecto
 
   return strDirectory;
 }
-
-/* PLEX */
-void CGUIMediaWindow::RefreshShares(bool update)
-{
-  if (m_vecItems->IsVirtualDirectoryRoot() && IsActive())
-  {
-    CPlexSourceScanner::MergeSourcesForWindow(GetID());
-    SetupShares();
-
-    if (update)
-    {
-      int iItem = m_viewControl.GetSelectedItem();
-      Update(m_vecItems->GetPath());
-      m_viewControl.SetSelectedItem(iItem);
-    }
-  }
-}
-
-void CGUIMediaWindow::Render()
-{
-  if (m_refreshTimer.IsRunning() && m_vecItems->GetAutoRefresh() > 0 && m_refreshTimer.GetElapsedSeconds() >= m_vecItems->GetAutoRefresh())
-  {
-    if (m_mediaRefresher == NULL)
-    {
-      // Start the directory auto-refreshing.
-      m_mediaRefresher = new PlexMediaRefresher(m_vecItems->GetPath());
-    }
-    else if (m_mediaRefresher->isDone())
-    {
-      // Assign the new stuff over.
-      m_vecItems->ClearItems();
-      m_vecItems->Append(m_mediaRefresher->getItemList());
-      m_vecItems->SetAutoRefresh(m_mediaRefresher->getItemList().GetAutoRefresh());
-
-      OnPrepareFileItems(*m_vecItems);
-      m_vecItems->FillInDefaultIcons();
-      FormatAndSort(*m_vecItems);
-      OnFinalizeFileItems(*m_vecItems);
-      m_viewControl.SetItems(*m_vecItems);
-
-      // Thumbnails.
-      if (GetBackgroundLoader())
-      {
-        if (GetBackgroundLoader()->IsLoading())
-          GetBackgroundLoader()->StopThread();
-
-        GetBackgroundLoader()->Load(*m_vecItems);
-      }
-
-      // Whack the timer.
-      m_refreshTimer.Reset();
-      m_mediaRefresher->die();
-      m_mediaRefresher = NULL;
-    }
-  }
-
-  CGUIWindow::Render();
-}
-
-/* END PLEX */

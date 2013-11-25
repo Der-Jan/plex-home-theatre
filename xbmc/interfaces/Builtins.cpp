@@ -90,6 +90,12 @@
 #include <vector>
 #include "xbmc/settings/AdvancedSettings.h"
 
+
+/* PLEX */
+#include "PlexApplication.h"
+#include "AutoUpdate/PlexAutoUpdate.h"
+/* END PLEX */
+
 using namespace std;
 using namespace XFILE;
 using namespace ADDON;
@@ -108,8 +114,9 @@ typedef struct
 const BUILT_IN commands[] = {
   /* PLEX */
   #if defined(__APPLE__) || defined(_WIN32)
-  { "ToggleDisplayBlanking",      false,  "Toggle display blanking"},
+  { "ToggleDisplayBlanking",      false,  "Toggle display blanking" },
   #endif
+  { "UpdateAndRestart",           false,  "Update PHT and restart" },
   /* END PLEX */
   { "Help",                       false,  "This help message" },
   { "Reboot",                     false,  "Reboot the system" },
@@ -615,8 +622,10 @@ int CBuiltins::Execute(const CStdString& execString)
 
     if ( askToResume == true )
     {
+#ifndef __PLEX__
       if ( CGUIWindowVideoBase::ShowResumeMenu(item) == false )
         return false;
+#endif
     }
     if (item.m_bIsFolder)
     {
@@ -1663,6 +1672,16 @@ int CBuiltins::Execute(const CStdString& execString)
     g_guiSettings.SetBool("videoscreen.blankdisplays", !g_guiSettings.GetBool("videoscreen.blankdisplays"));
     g_graphicsContext.UpdateDisplayBlanking();
     //g_graphicsContext.SetVideoResolution(g_graphicsContext.GetVideoResolution(), true);
+  }
+  else if (execute.Equals("updateandrestart"))
+  {
+#ifdef ENABLE_AUTOUPDATE
+    g_plexApplication.autoUpdater->UpdateAndRestart();
+#endif
+  }
+  else if (execute.Equals("togglewatched"))
+  {
+    g_application.OnAction(CAction(ACTION_TOGGLE_WATCHED));
   }
 #endif
   /* PLEX */

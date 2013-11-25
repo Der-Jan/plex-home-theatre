@@ -69,6 +69,7 @@ void CURL::Reset()
   m_strOptions.clear();
   m_strProtocolOptions.clear();
   m_options.Clear();
+  m_protocolOptions.Clear();
   m_iPort = 0;
 }
 
@@ -190,6 +191,9 @@ void CURL::Parse(const CStdString& strURL1)
     || strProtocol2.Equals("hdhomerun")
     || strProtocol2.Equals("rtsp")
     || strProtocol2.Equals("apk")
+    /* PLEX */
+    || strProtocol2.Equals("plexserver")
+    /* END PLEX */
     || strProtocol2.Equals("zip"))
     sep = "?;#|";
   else if(strProtocol2.Equals("ftp")
@@ -205,22 +209,14 @@ void CURL::Parse(const CStdString& strURL1)
       int iProto = strURL.find_first_of("|",iOptions);
       if (iProto >= 0)
       {
-        m_strProtocolOptions = strURL.substr(iProto+1);
-        m_strOptions = strURL.substr(iOptions,iProto-iOptions);
+        SetProtocolOptions(strURL.substr(iProto+1));
+        SetOptions(strURL.substr(iOptions,iProto-iOptions));
       }
       else
         m_strOptions = strURL.substr(iOptions);
       iEnd = iOptions;
       m_options.AddOptions(m_strOptions);
-
-      /* PLEX */
-      m_strWithoutOptions = strURL.substr(0,iOptions);
-      /* END PLEX */
     }
-    else
-      /* PLEX */
-      m_strWithoutOptions = strURL;
-      /* END PLEX */
   }
 
   int iSlash = strURL.Find("/", iPos);
@@ -361,6 +357,12 @@ void CURL::SetFileName(const CStdString& strFileName)
 {
   m_strFileName = strFileName;
 
+  /* PLEX */
+  /* Plex media server hates double // */
+  if (m_strProtocol == "plexserver" && m_strFileName.find_first_of("/") == 0)
+    m_strFileName = m_strFileName.substr(1);
+  /* END PLEX */
+
   int slash = m_strFileName.find_last_of(GetDirectorySeparator());
   int period = m_strFileName.find_last_of('.');
   if(period != -1 && (slash == -1 || period > slash))
@@ -410,7 +412,16 @@ void CURL::SetOptions(const CStdString& strOptions)
 
 void CURL::SetProtocolOptions(const CStdString& strOptions)
 {
-  m_strProtocolOptions = strOptions;
+  m_strProtocolOptions.Empty();
+  m_protocolOptions.Clear();
+  if (strOptions.length() > 0)
+  {
+    if (strOptions[0] == '|')
+      m_strProtocolOptions = strOptions.Mid(1);
+    else
+      m_strProtocolOptions = strOptions;
+    m_protocolOptions.AddOptions(m_strProtocolOptions);
+  }
 }
 
 void CURL::SetPort(int port)
@@ -817,8 +828,63 @@ void CURL::RemoveOption(const CStdString &key)
 }
 
 /* PLEX */
-const CStdString& CURL::GetUrlWithoutOptions() const
+CStdString CURL::GetUrlWithoutOptions() const
 {
-  return m_strWithoutOptions;
+  CURL t(Get());
+  t.SetProtocolOptions("");
+  t.SetOptions("");
+
+  CLog::Log(LOGDEBUG, "CURL::GetUrlWithoutOptions %s > %s", Get().c_str(), t.Get().c_str());
+
+  return t.Get();
+}
+
+void CURL::AddOptions(const CUrlOptions &options)
+{
+  for (CUrlOptions::UrlOptions::const_iterator option = options.GetOptions().begin(); option != options.GetOptions().end(); option++)
+    SetOption(option->first, option->second.asString());
 }
 /* END PLEX */
+
+void CURL::GetProtocolOptions(std::map<CStdString, CStdString> &options) const
+{
+  CUrlOptions::UrlOptions optionsMap = m_protocolOptions.GetOptions();
+  for (CUrlOptions::UrlOptions::const_iterator option = optionsMap.begin(); option != optionsMap.end(); option++)
+    options[option->first] = option->second.asString();
+}
+
+bool CURL::HasProtocolOption(const CStdString &key) const
+{
+  return m_protocolOptions.HasOption(key);
+}
+
+bool CURL::GetProtocolOption(const CStdString &key, CStdString &value) const
+{
+  CVariant valueObj;
+  if (!m_protocolOptions.GetOption(key, valueObj))
+    return false;
+  
+  value = valueObj.asString();
+  return true;
+}
+
+CStdString CURL::GetProtocolOption(const CStdString &key) const
+{
+  CStdString value;
+  if (!GetProtocolOption(key, value))
+    return "";
+  
+  return value;
+}
+
+void CURL::SetProtocolOption(const CStdString &key, const CStdString &value)
+{
+  m_protocolOptions.AddOption(key, value);
+  m_strProtocolOptions = m_protocolOptions.GetOptionsString(false);
+}
+
+void CURL::RemoveProtocolOption(const CStdString &key)
+{
+  m_protocolOptions.RemoveOption(key);
+  m_strProtocolOptions = m_protocolOptions.GetOptionsString(false);
+}

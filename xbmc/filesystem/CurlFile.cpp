@@ -218,10 +218,16 @@ CCurlFile::CReadState::CReadState()
   m_bufferSize = 0;
   m_cancelled = false;
   m_bFirstLoop = true;
+  m_sendRange = true;
   m_headerdone = false;
 
 #ifndef TARGET_WINDOWS
-  ::pipe(m_ticklePipe);
+  m_hasTicklePipe = true;
+  if (::pipe(m_ticklePipe) == -1)
+  {
+    CLog::Log(LOGWARNING, "CCurlFile::CReadState::CReadState failed when creating a pipe!");
+    m_hasTicklePipe = false;
+  }
 #endif
 }
 
@@ -234,10 +240,13 @@ CCurlFile::CReadState::~CReadState()
 
   /* PLEX */
 #ifndef TARGET_WINDOWS
-  ::shutdown(m_ticklePipe[0], 2);
-  ::close(m_ticklePipe[0]);
-  ::shutdown(m_ticklePipe[1], 2);
-  ::close(m_ticklePipe[1]);
+  if (m_hasTicklePipe)
+  {
+    ::shutdown(m_ticklePipe[0], 2);
+    ::close(m_ticklePipe[0]);
+    ::shutdown(m_ticklePipe[1], 2);
+    ::close(m_ticklePipe[1]);
+  }
 #endif
   /* END PLEX */
 }
@@ -285,14 +294,19 @@ bool CCurlFile::CReadState::Seek(int64_t pos)
 void CCurlFile::CReadState::SetResume(void)
 {
   /*
-   * Use RANGE method for resuming. We used to use RESUME_FROM_LARGE for this but some http servers
-   * require us to always send the range request header. If we don't the server may provide different
-   * content causing seeking to fail. Note that internally Curl will automatically handle this for FTP
-   * so we don't need to worry about that here.
+   * Explicitly set RANGE header when filepos=0 as some http servers require us to always send the range
+   * request header. If we don't the server may provide different content causing seeking to fail.
+   * This only affects HTTP-like items, for FTP it's a null operation.
    */
-  char str[21];
-  sprintf(str, "%"PRId64"-", m_filePos);
-  g_curlInterface.easy_setopt(m_easyHandle, CURLOPT_RANGE, str);
+  if (m_sendRange && m_filePos == 0)
+    g_curlInterface.easy_setopt(m_easyHandle, CURLOPT_RANGE, "0-");
+  else
+  {
+    g_curlInterface.easy_setopt(m_easyHandle, CURLOPT_RANGE, NULL);
+    m_sendRange = false;
+  }
+
+  g_curlInterface.easy_setopt(m_easyHandle, CURLOPT_RESUME_FROM_LARGE, m_filePos);
 }
 
 long CCurlFile::CReadState::Connect(unsigned int size)
@@ -596,20 +610,6 @@ void CCurlFile::SetCommonOptions(CReadState* state)
 
   // Set the lowspeed time very low as it seems Curl takes much longer to detect a lowspeed condition
   g_curlInterface.easy_setopt(h, CURLOPT_LOW_SPEED_TIME, m_lowspeedtime);
-
-  /* PLEX */
-  // See if we need to add any options from the FileItem.
-  if (g_application.CurrentFileItem().GetPath() == m_url)
-  {
-    CStdString cookies = g_application.CurrentFileItem().GetProperty("httpCookies").asString();
-    if (cookies.size() > 0)
-      g_curlInterface.easy_setopt(h, CURLOPT_COOKIE, cookies.c_str());
-
-    CStdString userAgent = g_application.CurrentFileItem().GetProperty("userAgent").asString();
-    if (userAgent.size() > 0)
-      g_curlInterface.easy_setopt(h, CURLOPT_USERAGENT, userAgent.c_str());
-  }
-  /* END PLEX */
 
   if (m_skipshout)
     // For shoutcast file, content-length should not be set, and in libcurl there is a bug, if the
@@ -943,6 +943,10 @@ bool CCurlFile::Open(const CURL& url)
   CURL url2(url);
   ParseAndCorrectUrl(url2);
 
+  /* PLEX */
+  m_state->m_url = url2.Get();
+  /* END PLEX */
+
   CLog::Log(LOGDEBUG, "CurlFile::Open(%p) %s", (void*)this, m_url.c_str());
 
   ASSERT(!(!m_state->m_easyHandle ^ !m_state->m_multiHandle));
@@ -952,6 +956,7 @@ bool CCurlFile::Open(const CURL& url)
   // setup common curl options
   SetCommonOptions(m_state);
   SetRequestHeaders(m_state);
+  m_state->m_sendRange = m_seekable;
 
   m_httpresponse = m_state->Connect(m_bufferSize);
 #ifndef __PLEX__
@@ -976,7 +981,11 @@ bool CCurlFile::Open(const CURL& url)
      || !m_state->m_httpheader.GetValue("icy-br").IsEmpty()) && !m_skipshout)
   {
     CLog::Log(LOGDEBUG,"CurlFile - file <%s> is a shoutcast stream. re-opening", m_url.c_str());
+#ifndef __PLEX__
     throw new CRedirectException(new CShoutcastFile);
+#else
+    throw new CRedirectException(new CShoutcastFile, new CURL(m_url));
+#endif
   }
 
   /* PLEX */
@@ -1137,6 +1146,10 @@ int64_t CCurlFile::Seek(int64_t iFilePosition, int iWhence)
     oldstate = m_state;
     m_state = new CReadState();
 
+    /* PLEX */
+    m_state->m_url = url.Get();
+    /* END PLEX */
+
     g_curlInterface.easy_aquire(url.GetProtocol(), url.GetHostName(), &m_state->m_easyHandle, &m_state->m_multiHandle );
 
     // setup common curl options
@@ -1149,6 +1162,7 @@ int64_t CCurlFile::Seek(int64_t iFilePosition, int iWhence)
   SetRequestHeaders(m_state);
 
   m_state->m_filePos = nextPos;
+  m_state->m_sendRange = true;
   if (oldstate)
     m_state->m_fileSize = oldstate->m_fileSize;
 
@@ -1389,7 +1403,11 @@ bool CCurlFile::CReadState::FillBuffer(unsigned int want)
             if (msg->data.result == CURLE_OK)
               return true;
 
+#ifndef __PLEX__
             CLog::Log(LOGWARNING, "%s: curl failed with code %i", __FUNCTION__, msg->data.result);
+#else
+            CLog::Log(LOGWARNING, "%s: curl [%s] failed with code %i", __FUNCTION__, m_url.c_str(), msg->data.result);
+#endif
 
             // We need to check the result here as we don't want to retry on every error
             if ( (msg->data.result == CURLE_OPERATION_TIMEDOUT ||
@@ -1398,6 +1416,16 @@ bool CCurlFile::CReadState::FillBuffer(unsigned int want)
                   msg->data.result == CURLE_RECV_ERROR)        &&
                   !m_bFirstLoop)
               CURLresult = msg->data.result;
+            else if ( (msg->data.result == CURLE_HTTP_RANGE_ERROR     ||
+                       msg->data.result == CURLE_HTTP_RETURNED_ERROR) &&
+                       m_bFirstLoop                                   &&
+                       m_filePos == 0                                 &&
+                       m_sendRange)
+            {
+              // If server returns a range or http error, retry with range disabled
+              CURLresult = msg->data.result;
+              m_sendRange = false;
+            }
             else
               return false;
           }
@@ -1466,9 +1494,12 @@ bool CCurlFile::CReadState::FillBuffer(unsigned int want)
         /* PLEX */
 #ifndef TARGET_WINDOWS
         // Add the tickle pipe
-        FD_SET(m_ticklePipe[0], &fdread);
-        if (m_ticklePipe[0] > maxfd)
-          maxfd = m_ticklePipe[0];
+        if (maxfd != -1 && m_hasTicklePipe)
+        {
+          FD_SET(m_ticklePipe[0], &fdread);
+          if (m_ticklePipe[0] > maxfd)
+            maxfd = m_ticklePipe[0];
+        }
 #endif
         /* END PLEX */
 
@@ -1485,11 +1516,14 @@ bool CCurlFile::CReadState::FillBuffer(unsigned int want)
         /* PLEX */
 #ifndef TARGET_WINDOWS
         // Read the byte from the tickle socket if there was one
-        if (FD_ISSET(m_ticklePipe[0], &fdread))
+        if (m_hasTicklePipe)
         {
-          CLog::Log(LOGINFO, "The curl loop was woken up.");
-          char theTickleByte;
-          ::read(m_ticklePipe[0], &theTickleByte, 1);
+          if (FD_ISSET(m_ticklePipe[0], &fdread))
+          {
+            CLog::Log(LOGINFO, "The curl loop was woken up.");
+            char theTickleByte;
+            ::read(m_ticklePipe[0], &theTickleByte, 1);
+          }
         }
 #endif
         /* END PLEX */

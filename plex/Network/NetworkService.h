@@ -8,11 +8,6 @@
 #pragma once
 
 #include <boost/asio.hpp>
-#include <boost/lexical_cast.hpp>
-
-#ifdef _WIN32
-#define usleep(x) Sleep(x/1000)
-#endif
 
 #define NS_BROWSE_REFRESH_INTERVAL  5000
 #define NS_REMOVAL_INTERVAL         2000
@@ -69,19 +64,10 @@ class NetworkService
   
   boost::asio::ip::address address() { return m_address; }    
   void        freshen(map<string, string>& params) { m_parameters = params; m_timeSinceLastSeen.restart(); }
-  void        freshen() { m_timeSinceLastSeen.restart(); }
   int         interfaceIndex() const { return m_interfaceIndex; }
   double      timeSinceLastSeen() { return m_timeSinceLastSeen.elapsed(); }
   double      timeSinceCreation() { return m_timeSinceCreation.elapsed(); }
   string      getUrl() { return "http://" + m_address.to_string() + ":" + getParam("Port"); }
-  
-  unsigned short port()
-  {
-    if (getParam("Port").empty() == false)
-      return boost::lexical_cast<unsigned short>(getParam("Port"));
-    
-    return 0;
-  }
   
  private:
   

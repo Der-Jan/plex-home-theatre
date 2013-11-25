@@ -25,6 +25,7 @@
 #include <string>
 
 #include "guilib/GUIWindow.h"
+#include "guilib/GUIStaticItem.h"
 #include "PlexContentPlayerMixin.h"
 #include "Job.h"
 #include <boost/timer.hpp>
@@ -32,6 +33,10 @@
 #include "VideoThumbLoader.h"
 #include "MusicThumbLoader.h"
 #include "PictureThumbLoader.h"
+
+#include "Utility/PlexTimer.h"
+#include "PlexNavigationHelper.h"
+#include "PlexGlobalTimer.h"
 
 
 // List IDs.
@@ -50,48 +55,27 @@
 
 class CGUIWindowHome;
 
-class CAuxFanLoadThread : public CThread
+enum SectionTypes
 {
-  public:
-    CAuxFanLoadThread() : CThread("Aux Fan Load Thread"), m_numSeconds(5) {}
-    void Process();
-
-    int m_numSeconds;
+  SECTION_TYPE_MOVIE,
+  SECTION_TYPE_HOME_MOVIE,
+  SECTION_TYPE_SHOW,
+  SECTION_TYPE_ALBUM,
+  SECTION_TYPE_PHOTOS,
+  SECTION_TYPE_QUEUE,
+  SECTION_TYPE_GLOBAL_FANART,
+  SECTION_TYPE_CHANNELS
 };
 
-typedef std::pair<int, CFileItemListPtr> contentListPair;
-
-class CPlexSectionLoadJob : public CJob
-{
-  public:
-    CPlexSectionLoadJob(const CStdString& url, int contentType) :
-      CJob(), m_url(url), m_contentType(contentType), m_list(new CFileItemList) {}
-
-    bool DoWork()
-    {
-
-      CPlexDirectory dir(true, false);
-      m_list->Clear();
-      return dir.GetDirectory(m_url, *m_list.get());
-    }
-
-    int GetContentType() const { return m_contentType; }
-    CFileItemListPtr GetFileItemList() const { return m_list; }
-    CStdString GetUrl() const { return m_url; }
-
-  private:
-    CStdString m_url;
-    CFileItemListPtr m_list;
-    int m_contentType;
-};
+typedef std::pair<int, CFileItemList*> contentListPair;
 
 class CPlexSectionFanout : public IJobCallback
 {
   public:
-    CPlexSectionFanout(const CStdString& url, int sectionType);
+    CPlexSectionFanout(const CStdString& url, SectionTypes sectionType);
 
-    std::vector<contentListPair> GetContentLists();
-    CFileItemListPtr GetContentList(int type);
+    void GetContentTypes(std::vector<int> &types);
+    void GetContentList(int type, CFileItemList& list);
     void Refresh();
     void Show();
     void CancelJobs();
@@ -99,56 +83,62 @@ class CPlexSectionFanout : public IJobCallback
     bool NeedsRefresh();
     static CStdString GetBestServerUrl(const CStdString& extraUrl="");
     CStdString GetContent(const CStdString& url);
+  
+    SectionTypes m_sectionType;
+    bool m_needsRefresh;
 
   private:
-    int LoadSection(const CStdString& url, int contentType);
+    int LoadSection(const CURL& url, int contentType);
     void OnJobComplete(unsigned int jobID, bool success, CJob *job);
     void OnJobProgress(unsigned int jobID, unsigned int progress, unsigned int total, const CJob *job) {}
 
-    std::map<int, CFileItemListPtr> m_fileLists;
-    CStdString m_url;
-    boost::timer m_age;
+    std::map<int, CFileItemList*> m_fileLists;
+    CURL m_url;
+    CPlexTimer m_age;
     CCriticalSection m_critical;
-    int m_sectionType;
     std::vector<int> m_outstandingJobs;
 
     std::map<CStdString, CStdString> m_UrlCache;
     CCurlFile  m_http;
-  
-    /* Thumb loaders, we pre-cache posters to make the fanouts quick and nice */
-    CVideoThumbLoader m_videoThumb;
 };
 
-class CGUIWindowHome : public CGUIWindow,
-                       public PlexContentPlayerMixin
+class CGUIWindowHome : public CGUIWindow, public PlexContentPlayerMixin, public IPlexGlobalTimeout, public IJobCallback
 {
 public:
   CGUIWindowHome(void);
   virtual ~CGUIWindowHome(void) {}
   virtual bool OnMessage(CGUIMessage& message);
 
-
-private:
+  private:
   virtual bool OnAction(const CAction &action);
   virtual bool OnPopupMenu();
   virtual bool CheckTimer(const CStdString& strExisting, const CStdString& strNew, int title, int line1, int line2);
   virtual CFileItemPtr GetCurrentListItem(int offset = 0);
 
+  static SectionTypes GetSectionTypeFromDirectoryType(EPlexDirectoryType dirType);
   void HideAllLists();
   void RestoreSection();
-  void RefreshSection(const CStdString& url, int type);
+  void RefreshSection(const CStdString& url, SectionTypes type);
   void RefreshAllSections(bool force = true);
-  void AddSection(const CStdString& url, int sectionType);
+  void RefreshSectionsForServer(const CStdString &uuid);
+  void AddSection(const CStdString& url, SectionTypes sectionType);
   void RemoveSection(const CStdString& url);
   bool ShowSection(const CStdString& url);
   bool ShowCurrentSection();
-  std::vector<contentListPair> GetContentListsFromSection(const CStdString& url);
-  CFileItemListPtr GetContentListFromSection(const CStdString& url, int contentType);
+  bool GetContentTypesFromSection(const CStdString& url, std::vector<int> &types);
+  bool GetContentListFromSection(const CStdString& url, int contentType, CFileItemList &list);
+  void SectionNeedsRefresh(const CStdString& url);
+  void OpenItem(CFileItemPtr item);
+
+  void OnJobComplete(unsigned int jobID, bool success, CJob *job);
+
+  void OnTimeout();
 
   CStdString GetCurrentItemName(bool onlySections=false);
   CFileItem* GetCurrentFileItem();
 
   void UpdateSections();
+  CGUIStaticItemPtr ItemToSection(CFileItemPtr item);
     
   bool                       m_globalArt;
   
@@ -159,7 +149,11 @@ private:
 
   std::map<CStdString, CPlexSectionFanout*> m_sections;
   
-  CAuxFanLoadThread*         m_auxLoadingThread;
   CStdString                 m_lastSelectedItem;
+  CStdString                 m_currentFanArt;
+  CStdString                 m_lastSelectedSubItem;
+  CEvent                     m_loadNavigationEvent;
+  bool                       m_cacheLoadFail;
+  CPlexNavigationHelper      m_navHelper;
 };
 

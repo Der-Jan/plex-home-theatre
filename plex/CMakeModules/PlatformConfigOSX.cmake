@@ -1,7 +1,7 @@
 # vim: setlocal syntax=cmake:
 
 if(NOT DEFINED OSX_ARCH)
-  set(OSX_ARCH i386)
+  set(OSX_ARCH x86_64)
 endif()
 
 if(NOT OSX_ARCH STREQUAL "i386" AND NOT OSX_ARCH STREQUAL "x86_64")
@@ -48,11 +48,7 @@ if(DEFINED XCODE_VERSION)
 endif()
 
 ######################### Compiler CFLAGS
-if(NOT DEFINED OSX_SDK)
-   set(OSX_SDK ${OSX_SDK_PATH})
-endif()
-
-set(EXTRA_CFLAGS "-mmacosx-version-min=10.6 -isysroot ${OSX_SDK}")
+set(EXTRA_CFLAGS "-mmacosx-version-min=10.6 -isysroot ${OSX_SDK_PATH}")
 
 ######################### CHECK LIBRARIES / FRAMEWORKS
 #### Frameworks for MacOSX
@@ -98,6 +94,7 @@ set(external_libs
   GLEW
   vorbis
   vorbisenc
+  gnutls
 )
 
 set(ffmpeg_libs
@@ -181,4 +178,4 @@ set(HAVE_LIBVDADECODER 1)
 set(AC_APPLE_UNIVERSAL_BUILD 0)
 
 ################## Definitions
-add_definitions(-DTARGET_DARWIN -DTARGET_DARWIN_OSX)
+add_definitions(-DTARGET_DARWIN -DTARGET_DARWIN_OSX -DUSE_EXTERNAL_FFMPEG)

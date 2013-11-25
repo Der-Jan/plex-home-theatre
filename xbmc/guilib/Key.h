@@ -315,6 +315,12 @@
 
 #define ACTION_FILTER                 233
 
+/* PLEX */
+#define ACTION_MARK_AS_UNWATCHED      300
+#define ACTION_MARK_AS_WATCHED        301
+#define ACTION_CLEAR_FILTERS          302
+/* END PLEX */
+
 // Window ID defines to make the code a bit more readable
 #define WINDOW_INVALID                     9999
 #define WINDOW_HOME                       10000

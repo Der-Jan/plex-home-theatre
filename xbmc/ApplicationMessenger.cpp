@@ -444,6 +444,12 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
         {
           for (int i=0;i<items.Size();++i)
             pSlideShow->Add(items[i].get());
+
+          /* PLEX */
+          if (pMsg->params.size() > 0)
+            pSlideShow->Select(pMsg->params[0]);
+          /* END PLEX */
+
           pSlideShow->StartSlideShow(); //Start the slideshow!
         }
 
@@ -1068,6 +1074,18 @@ void CApplicationMessenger::PictureSlideShow(string pathname, bool addTBN /* = f
   SendMessage(tMsg);
 }
 
+/* PLEX */
+void CApplicationMessenger::PictureSlideShow(string pathname, bool addTBN, const string& index)
+{
+  DWORD dwMessage = TMSG_PICTURE_SLIDESHOW;
+  ThreadMessage tMsg = {dwMessage};
+  tMsg.strParam = pathname;
+  tMsg.dwParam1 = addTBN ? 1 : 0;
+  tMsg.params.push_back(index);
+  SendMessage(tMsg);
+}
+/* END PLEX */
+
 void CApplicationMessenger::SetGUILanguage(const std::string &strLanguage)
 {
   ThreadMessage tMsg = {TMSG_SETLANGUAGE};
@@ -1150,13 +1168,13 @@ void CApplicationMessenger::Minimize(bool wait)
   SendMessage(tMsg, wait);
 }
 
-void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CStdString &param)
+void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CStdString &param, /* PLEX */ bool wait /*END PLEX */)
 {
   ThreadMessage tMsg = {TMSG_GUI_DO_MODAL};
   tMsg.lpVoid = pDialog;
   tMsg.dwParam1 = (DWORD)iWindowID;
   tMsg.strParam = param;
-  SendMessage(tMsg, true);
+  SendMessage(tMsg, wait /* PLEX */);
 }
 
 void CApplicationMessenger::ExecOS(const CStdString command, bool waitExit)

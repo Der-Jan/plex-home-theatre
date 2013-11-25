@@ -1,6 +1,8 @@
 
-include(CheckSystemIncludes)
-include(CheckSystemFunctions)
+if(NOT WIN32)
+  include(CheckSystemIncludes)
+  include(CheckSystemFunctions)
+endif(NOT WIN32)
 
 set(PLEX_TARGET_NAME PlexHomeTheater)
 
@@ -10,10 +12,16 @@ set(CONFIG_INTERNAL_LIBS
   lib_upnp
 )
 
-#OPTION(ENABLE_DVD_DRIVE "Enable the DVD drive" ON)
+OPTION(ENABLE_DVD_DRIVE "Enable the DVD drive" OFF)
 OPTION(ENABLE_PYTHON "Enable Python addon support" OFF)
 OPTION(CREATE_BUNDLE "Create the finished bundle" ON)
 OPTION(COMPRESS_TEXTURES "If we should compress the textures or not" ON)
+OPTION(ENABLE_NEW_SKIN "Enable the new Plex skin" ON)
+OPTION(ENABLE_AUTOUPDATE "Enable the cool autoupdate system" ON)
+
+if(ENABLE_NEW_SKIN)
+  add_definitions(-DPLEX_NEW_SKIN=1)
+endif(ENABLE_NEW_SKIN)
 
 if(NOT DEFINED TARGET_PLATFORM)
   if(APPLE)
@@ -61,16 +69,22 @@ if(TARGET_POSIX)
 endif(TARGET_POSIX)
 
 ############ global definitions set for all platforms
-add_definitions(-D__PLEX__ -D__PLEX__XBMC__ -DPLEX_TARGET_NAME="${EXECUTABLE_NAME}" -DPLEX_VERSION="${PLEX_VERSION_STRING_SHORT_BUILD}")
 
-if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-  add_definitions(-DDEBUG)
-else()
-  add_definitions(-DNDEBUG)
-endif()
+if(TARGET_OSX)
+  set(BUILD_TAG "macosx-${OSX_ARCH}")
+elseif(TARGET_WIN32)
+  set(BUILD_TAG "windows-x86")
+elseif(TARGET_LINUX)
+  set(BUILD_TAG "linux-${CMAKE_HOST_SYSTEM_PROCESSOR}")
+endif(TARGET_OSX)
+
+add_definitions(-D__PLEX__ -D__PLEX__XBMC__ -DPLEX_BUILD_TAG="${BUILD_TAG}" -DPLEX_TARGET_NAME="${EXECUTABLE_NAME}" -DENABLE_DVDINPUTSTREAM_STACK)
+set_directory_properties(PROPERTIES COMPILE_DEFINITIONS_DEBUG "_DEBUG")
 
 include(CheckFFmpegIncludes)
-#include(CheckCrystalHDInclude)
+if (NOT TARGET_RPI)
+  include(CheckCrystalHDInclude)
+endif()
 include(CheckLibshairportConfig)
 
 if(DEFINED SDL_FOUND)
@@ -82,15 +96,12 @@ if(ENABLE_PYTHON)
 endif()
 
 set(USE_UPNP 1)
-set(HAS_LIBRTMP 1)
 
 if(ENABLE_DVD_DRIVE)
   set(HAS_DVD_DRIVE 1)
 endif(ENABLE_DVD_DRIVE)
 
 configure_file(${root}/xbmc/DllPaths_generated.h.in ${CMAKE_BINARY_DIR}/xbmc/DllPaths_generated.h)
-configure_file(${plexdir}/config.h.in ${CMAKE_BINARY_DIR}/xbmc/config.h)
-set_source_files_properties(xbmc/config.h PROPERTIES GENERATED TRUE)
 
 find_package(SSE)
 if(NOT TARGET_WIN32)
@@ -105,13 +116,35 @@ else(NOT TARGET_WIN32)
   set(CMAKE_SSE_CFLAGS "/arch:SSE2")
 endif(NOT TARGET_WIN32)
 
+find_package(Breakpad)
+if(HAVE_BREAKPAD)
+  include_directories(${BREAKPAD_INC_DIR})
+  add_definitions(-DHAVE_BREAKPAD)
+endif(HAVE_BREAKPAD)
+
+# check some compiler Intrinsics
+find_package(Intrinsics)
+
+# this file is not needed on windows
+if(NOT WIN32)
+  configure_file(${plexdir}/config.h.in ${CMAKE_BINARY_DIR}/xbmc/config.h)
+  set_source_files_properties(xbmc/config.h PROPERTIES GENERATED TRUE)
+endif(NOT WIN32)
+
 message(STATUS "-- Configuration Summary:")
 message(STATUS "Enable DVD drive: " ${ENABLE_DVD_DRIVE})
 message(STATUS "Enable Python support: " ${ENABLE_PYTHON})
 message(STATUS "Enabling bundling: " ${CREATE_BUNDLE})
 message(STATUS "Compress textures: " ${COMPRESS_TEXTURES})
+message(STATUS "Enable AutoUpdate: " ${ENABLE_AUTOUPDATE})
 if(CMAKE_SSE_CFLAGS)
   message(STATUS "SSE CFLAGS: ${CMAKE_SSE_CFLAGS}")
 else(CMAKE_SSE_CFLAGS)
   message(STATUS "SSE CFLAGS: none")
 endif(CMAKE_SSE_CFLAGS)
+
+if(HAVE_BREAKPAD)
+  message(STATUS "Enable CrashReports: yes")
+else(HAVE_BREAKPAD)
+  message(STATUS "Enable CrashReports: no")
+endif(HAVE_BREAKPAD)

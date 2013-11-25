@@ -74,12 +74,6 @@
 #include "utils/GroupUtils.h"
 #include "filesystem/File.h"
 
-/* PLEX */
-#include "BackgroundMusicPlayer.h"
-#include "PlexMediaServerQueue.h"
-#include "PlexContentPlayerMixin.h"
-/* END PLEX */
-
 using namespace std;
 using namespace XFILE;
 using namespace PLAYLIST;
@@ -104,6 +98,7 @@ CGUIWindowVideoBase::CGUIWindowVideoBase(int id, const CStdString &xmlFile)
   m_thumbLoader.SetObserver(this);
   m_thumbLoader.SetStreamDetailsObserver(this);
   m_stackingAvailable = true;
+  m_dlgProgress = NULL;
 }
 
 CGUIWindowVideoBase::~CGUIWindowVideoBase()
@@ -135,10 +130,6 @@ bool CGUIWindowVideoBase::OnMessage(CGUIMessage& message)
     if (m_thumbLoader.IsLoading())
       m_thumbLoader.StopThread();
     m_database.Close();
-
-    /* PLEX */
-    BackgroundMusicPlayer::SendThemeChangeMessage();
-    /* END PLEX */
     break;
 
   case GUI_MSG_WINDOW_INIT:
@@ -223,7 +214,6 @@ bool CGUIWindowVideoBase::OnMessage(CGUIMessage& message)
         {
           return OnResumeItem(iItem);
         }
-#ifndef __PLEX__
         else if (iAction == ACTION_DELETE_ITEM)
         {
           // is delete allowed?
@@ -246,7 +236,6 @@ bool CGUIWindowVideoBase::OnMessage(CGUIMessage& message)
             return true;
           }
         }
-#endif
       }
     }
     break;
@@ -286,12 +275,11 @@ void CGUIWindowVideoBase::UpdateButtons()
   CGUIMediaWindow::UpdateButtons();
 }
 
-void CGUIWindowVideoBase::OnInfo(CFileItemPtr pItem, const ADDON::ScraperPtr& scraper)
+void CGUIWindowVideoBase::OnInfo(CFileItem* pItem, const ADDON::ScraperPtr& scraper)
 {
   if (!pItem)
     return;
 
-#ifndef __PLEX__
   if (pItem->IsParentFolder() || pItem->m_bIsShareOrDrive || pItem->GetPath().Equals("add") ||
      (pItem->IsPlayList() && !URIUtils::GetExtension(pItem->GetPath()).Equals(".strm")))
     return;
@@ -349,11 +337,6 @@ void CGUIWindowVideoBase::OnInfo(CFileItemPtr pItem, const ADDON::ScraperPtr& sc
      (g_windowManager.GetActiveWindow() == WINDOW_VIDEO_FILES ||
       g_windowManager.GetActiveWindow() == WINDOW_VIDEO_NAV)) // since we can be called from the music library we need this check
   {
-#endif
-  /* PLEX */
-  bool modified = ShowIMDB(pItem, scraper);
-  if (modified) {
-  /* END PLEX */
     int itemNumber = m_viewControl.GetSelectedItem();
     Refresh();
     m_viewControl.SetSelectedItem(itemNumber);
@@ -381,25 +364,8 @@ void CGUIWindowVideoBase::OnInfo(CFileItemPtr pItem, const ADDON::ScraperPtr& sc
 //     and show the information.
 // 6.  Check for a refresh, and if so, go to 3.
 
-bool CGUIWindowVideoBase::ShowIMDB(CFileItemPtr item, const ScraperPtr &info2)
+bool CGUIWindowVideoBase::ShowIMDB(CFileItem *item, const ScraperPtr &info2)
 {
-#ifdef __PLEX__
-  CGUIDialogProgress* pDlgProgress = (CGUIDialogProgress*)g_windowManager.GetWindow(WINDOW_DIALOG_PROGRESS);
-  CGUIDialogSelect* pDlgSelect = (CGUIDialogSelect*)g_windowManager.GetWindow(WINDOW_DIALOG_SELECT);
-  CGUIDialogVideoInfo* pDlgInfo = (CGUIDialogVideoInfo*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_INFO);
-
-  if (!pDlgProgress) return false;
-  if (!pDlgSelect) return false;
-  if (!pDlgInfo) return false;
-
-  pDlgInfo->SetMovie(item);
-  pDlgInfo->DoModal();
-
-  if (pDlgInfo->NeedRefresh() == false)
-    return false;
-
-  return true;
-#else
   /*
   CLog::Log(LOGDEBUG,"CGUIWindowVideoBase::ShowIMDB");
   CLog::Log(LOGDEBUG,"  strMovie  = [%s]", strMovie.c_str());
@@ -761,7 +727,6 @@ bool CGUIWindowVideoBase::ShowIMDB(CFileItemPtr item, const ScraperPtr &info2)
   } while (needsRefresh);
   m_database.Close();
   return listNeedsUpdating;
-#endif
 }
 
 void CGUIWindowVideoBase::OnQueueItem(int iItem)
@@ -888,7 +853,6 @@ void CGUIWindowVideoBase::AddItemToPlayList(const CFileItemPtr &pItem, CFileItem
 
 void CGUIWindowVideoBase::GetResumeItemOffset(const CFileItem *item, int& startoffset, int& partNumber)
 {
-#ifndef __PLEX__
   // do not resume livetv
   if (item->IsLiveTV())
     return;
@@ -924,11 +888,6 @@ void CGUIWindowVideoBase::GetResumeItemOffset(const CFileItem *item, int& starto
       db.Close();
     }
   }
-  return startoffset;
-#else
-  if (item->HasProperty("viewOffset"))
-    startoffset = boost::lexical_cast<int>(item->GetProperty("viewOffset").asString()) * 75 / 1000;
-#endif
 }
 
 bool CGUIWindowVideoBase::HasResumeItemOffset(const CFileItem *item)
@@ -1008,8 +967,7 @@ bool CGUIWindowVideoBase::OnFileAction(int iItem, int action)
     OnPopupMenu(iItem);
     return true;
   case SELECT_ACTION_RESUME:
-    if (item) /* PLEX added check */
-      item->m_lStartOffset = STARTOFFSET_RESUME;
+    item->m_lStartOffset = STARTOFFSET_RESUME;
     break;
   case SELECT_ACTION_PLAYPART:
     if (!OnPlayStackPart(iItem))
@@ -1028,7 +986,7 @@ bool CGUIWindowVideoBase::OnInfo(int iItem)
     return false;
 
   CFileItemPtr item = m_vecItems->Get(iItem);
-#ifndef __PLEX__
+
   if (item->GetPath().Equals("add") || item->IsParentFolder() ||
      (item->IsPlayList() && !URIUtils::GetExtension(item->GetPath()).Equals(".strm")))
     return false;
@@ -1066,10 +1024,7 @@ bool CGUIWindowVideoBase::OnInfo(int iItem)
   }
 
   OnInfo(item.get(), scraper);
-#else
-  ADDON::ScraperPtr info;
-  OnInfo(item, info);
-#endif
+
   return true;
 }
 
@@ -1081,7 +1036,6 @@ void CGUIWindowVideoBase::OnRestartItem(int iItem)
 CStdString CGUIWindowVideoBase::GetResumeString(const CFileItem &item)
 {
   CStdString resumeString;
-#ifndef __PLEX__
   int startOffset = 0, startPart = 0;
   GetResumeItemOffset(&item, startOffset, startPart);
   if (startOffset > 0)
@@ -1094,14 +1048,6 @@ CStdString CGUIWindowVideoBase::GetResumeString(const CFileItem &item)
       resumeString += " (" + partString + ")";
     }
   }
-#else
-  // See if we have a view offset.
-  if (item.HasProperty("viewOffset"))
-  {
-    float seconds = boost::lexical_cast<float>(item.GetProperty("viewOffset").asString()) / 1000.0f;
-    resumeString.Format(g_localizeStrings.Get(12022).c_str(), StringUtils::SecondsToTimeString(lrint(seconds)).c_str());
-  }
-#endif
   return resumeString;
 }
 
@@ -1219,11 +1165,6 @@ bool CGUIWindowVideoBase::OnResumeItem(int iItem)
   if (iItem < 0 || iItem >= m_vecItems->Size()) return true;
   CFileItemPtr item = m_vecItems->Get(iItem);
 
-  /* PLEX */
-  if (PlexContentPlayerMixin::ProcessMediaChoice(item.get()) == false)
-    return false;
-  /* END PLEX */
-
   if (item->m_bIsFolder)
   {
     // resuming directories isn't supported yet. play.
@@ -1263,11 +1204,6 @@ void CGUIWindowVideoBase::OnStreamDetails(const CStreamDetails &details, const C
 
 void CGUIWindowVideoBase::GetContextButtons(int itemNumber, CContextButtons &buttons)
 {
-  /* PLEX */
-  if (m_vecItems->GetContent() == "secondary" || m_vecItems->GetContent() == "plugins")
-    return;
-  /* END PLEX */
-
   CFileItemPtr item;
   if (itemNumber >= 0 && itemNumber < m_vecItems->Size())
     item = m_vecItems->Get(itemNumber);
@@ -1318,10 +1254,8 @@ void CGUIWindowVideoBase::GetContextButtons(int itemNumber, CContextButtons &but
         }
         else
           CPlayerCoreFactory::GetPlayers(*item, vecCores);
-#ifndef __PLEX__
         if (vecCores.size() > 1)
           buttons.Add(CONTEXT_BUTTON_PLAY_WITH, 15213);
-#endif
       }
       if (item->IsSmartPlayList())
       {
@@ -1512,15 +1446,13 @@ bool CGUIWindowVideoBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
         OnScan(strPath, true);
       }
       else
-        OnInfo(item,info);
+        OnInfo(item.get(),info);
 
       return true;
     }
-#ifndef __PLEX__
   case CONTEXT_BUTTON_DELETE:
     OnDeleteItem(itemNumber);
     return true;
-#endif
   case CONTEXT_BUTTON_EDIT_SMART_PLAYLIST:
     {
       CStdString playlist = m_vecItems->Get(itemNumber)->IsSmartPlayList() ? m_vecItems->Get(itemNumber)->GetPath() : m_vecItems->GetPath(); // save path as activatewindow will destroy our items
@@ -1531,7 +1463,6 @@ bool CGUIWindowVideoBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
   case CONTEXT_BUTTON_RENAME:
     OnRenameItem(itemNumber);
     return true;
-#ifndef __PLEX__
   case CONTEXT_BUTTON_MARK_WATCHED:
     {
       int newSelection = m_viewControl.GetSelectedItem() + 1;
@@ -1547,14 +1478,6 @@ bool CGUIWindowVideoBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
     CUtil::DeleteVideoDatabaseDirectoryCache();
     Refresh();
     return true;
-#else
-  case CONTEXT_BUTTON_MARK_UNWATCHED:
-    MarkUnWatched(item);
-    return true;
-  case CONTEXT_BUTTON_MARK_WATCHED:
-    MarkWatched(item, true);
-    return true;
-#endif
   case CONTEXT_BUTTON_PLAY_AND_QUEUE:
     return OnPlayAndQueueMedia(item);
   case CONTEXT_BUTTON_PLAY_ONLY_THIS:
@@ -1572,7 +1495,6 @@ bool CGUIWindowVideoBase::OnPlayMedia(int iItem)
 
   CFileItemPtr pItem = m_vecItems->Get(iItem);
 
-#ifndef __PLEX__
   // party mode
   if (g_partyModeManager.IsEnabled(PARTYMODECONTEXT_VIDEO))
   {
@@ -1581,7 +1503,6 @@ bool CGUIWindowVideoBase::OnPlayMedia(int iItem)
     g_partyModeManager.AddUserSongs(playlistTemp, true);
     return true;
   }
-#endif
 
   // Reset Playlistplayer, playback started now does
   // not use the playlistplayer.
@@ -1589,13 +1510,11 @@ bool CGUIWindowVideoBase::OnPlayMedia(int iItem)
   g_playlistPlayer.SetCurrentPlaylist(PLAYLIST_NONE);
 
   CFileItem item(*pItem);
-#ifndef __PLEX__
   if (pItem->IsVideoDb())
   {
     item.SetPath(pItem->GetVideoInfoTag()->m_strFileNameAndPath);
     item.SetProperty("original_listitem_url", pItem->GetPath());
   }
-#endif
   CLog::Log(LOGDEBUG, "%s %s", __FUNCTION__, item.GetPath().c_str());
 
   if (item.GetPath().Left(17) == "pvr://recordings/")
@@ -1701,7 +1620,6 @@ void CGUIWindowVideoBase::PlayMovie(const CFileItem *item)
     m_thumbLoader.Load(*m_vecItems);
 }
 
-#ifndef __PLEX__
 void CGUIWindowVideoBase::OnDeleteItem(int iItem)
 {
   if ( iItem < 0 || iItem >= m_vecItems->Size())
@@ -1778,18 +1696,6 @@ void CGUIWindowVideoBase::MarkWatched(const CFileItemPtr &item, bool bMark)
     database.Close(); 
   }
 }
-#else
-void CGUIWindowVideoBase::MarkUnWatched(const CFileItemPtr &item)
-{
-  item->MarkAsUnWatched();
-}
-
-//Add Mark a Title as watched
-void CGUIWindowVideoBase::MarkWatched(const CFileItemPtr &item, bool bMark)
-{
-  item->MarkAsWatched();
-}
-#endif
 
 //Add change a title's name
 void CGUIWindowVideoBase::UpdateVideoTitle(const CFileItem* pItem)
@@ -2301,7 +2207,6 @@ void CGUIWindowVideoBase::OnAssignContent(const CStdString &path)
 void CGUIWindowVideoBase::OnInitWindow()
 {
   CGUIMediaWindow::OnInitWindow();
-#ifndef __PLEX__
   if (g_settings.m_videoNeedsUpdate == 63 && !g_application.IsVideoScanning() &&
       g_infoManager.GetLibraryBool(LIBRARY_HAS_VIDEO))
   {
@@ -2313,5 +2218,4 @@ void CGUIWindowVideoBase::OnInitWindow()
       g_settings.Save();
     }
   }
-#endif
 }

@@ -19,6 +19,8 @@
 #include "FileSystem/PlexDirectory.h"
 #include "StringUtils.h"
 #include "PlexTypes.h"
+#include "dialogs/GUIDialogOK.h"
+#include "Client/PlexTranscoderClient.h"
 
 class PlexContentPlayerMixin
 {
@@ -40,108 +42,153 @@ class PlexContentPlayerMixin
       CGUIListItemPtr item = container->GetListItem(0);
 
       if (item)
-      {
-        CFileItem* file = (CFileItem* )item.get();
-    
-        // Now see what to do with it.
-        string type = file->GetProperty("type").asString();
-        if (type == "show" || type == "person")
-        {
-          ActivateWindow(WINDOW_VIDEO_FILES, file->GetPath());
-        }
-        else if (type == "artist" || type == "album")
-        {
-          ActivateWindow(WINDOW_MUSIC_FILES, file->GetPath());
-        }
-        else if (type == "track")
-        {
-          CFileItemList fileItems;
-          int itemIndex = 0;
-
-          if (file->HasProperty("parentPath"))
-          {
-            // Get album.
-            CPlexDirectory plexDir;
-            plexDir.GetDirectory(file->GetProperty("parentPath").asString(), fileItems);
-            
-            for (int i=0; i < fileItems.Size(); ++i)
-            {
-              CFileItemPtr fileItem = fileItems[i];
-              if (fileItem->GetProperty("unprocessedKey") == file->GetProperty("unprocessedKey"))
-              {
-                itemIndex = i;
-                break;
-              }
-            }
-          }
-          else
-          {
-            // Just add the track.
-            CFileItemPtr theTrack(new CFileItem(*file));
-            fileItems.Add(theTrack);
-          }
-          
-          g_playlistPlayer.ClearPlaylist(PLAYLIST_MUSIC);
-          g_playlistPlayer.Reset();
-          g_playlistPlayer.Add(PLAYLIST_MUSIC, fileItems);
-          g_playlistPlayer.SetCurrentPlaylist(PLAYLIST_MUSIC);
-          g_playlistPlayer.Play(itemIndex);
-        }
-        else if (type == "photo")
-        {
-          // Attempt to get the slideshow window
-          CGUIWindowSlideShow *pSlideShow = (CGUIWindowSlideShow *)g_windowManager.GetWindow(WINDOW_SLIDESHOW);
-          if (!pSlideShow)
-            return;
-          
-          // Stop playing video
-          if (g_application.IsPlayingVideo())
-            g_application.StopPlaying();
-          
-          // Reset the window and add each item from the container
-          pSlideShow->Reset();
-          BOOST_FOREACH(CGUIListItemPtr child, container->GetItems())
-            pSlideShow->Add((CFileItem *)child.get());
-          
-          // Set the currently selected photo
-          pSlideShow->Select(file->GetPath());
-          
-          // Start the slideshow and show the window
-          pSlideShow->StartSlideShow();
-          g_windowManager.ActivateWindow(WINDOW_SLIDESHOW);
-        }
-        else if (type == "channel")
-        {
-          if (file->GetPath().find("/video/") != string::npos)
-            ActivateWindow(WINDOW_VIDEO_FILES, file->GetPath());
-          else if (file->GetPath().find("/music/") != string::npos)
-            ActivateWindow(WINDOW_MUSIC_FILES, file->GetPath());
-          else if (file->GetPath().find("/applications/") != string::npos)
-            ActivateWindow(WINDOW_PROGRAMS, file->GetPath());
-          else
-            ActivateWindow(WINDOW_PICTURES, file->GetPath());
-        }
-        else
-        {
-          // If there is more than one media item, allow picking which one.
-          if (ProcessMediaChoice(file) == false)
-            return;
-          
-          // See if we're going to resume the playback or not.
-          if (ProcessResumeChoice(file) == false)
-            return;
-
-          // Allow class to save state.
-          SaveStateBeforePlay(container);
-          
-          // Play it.
-          g_application.PlayFile(*file);
-        }
-      }
+        PlayPlexItem(boost::static_pointer_cast<CFileItem>(item), container);
     }
   }
   
  public:
+
+  static CFileItemPtr GetNextUnwatched(const std::string& container)
+  {
+    CFileItemList list;
+    XFILE::CPlexDirectory dir;
+    if (dir.GetDirectory(container, list))
+    {
+      for (int i = 0; i < list.Size(); i ++)
+      {
+        CFileItemPtr n = list.Get(i);
+        if (n->GetOverlayImageID() == CGUIListItem::ICON_OVERLAY_IN_PROGRESS ||
+            n->GetOverlayImageID() == CGUIListItem::ICON_OVERLAY_UNWATCHED)
+          return n;
+      }
+
+      // if we didn't find any inprogress or unwatched just ... eh take the first one?
+      return list.Get(0);
+    }
+    return CFileItemPtr();
+  }
+  
+  static void PlayPlexItem(const CFileItemPtr file, CGUIBaseContainer* container=NULL)
+  {
+    /* something went wrong ... */
+    if (file->HasProperty("unavailable") && file->GetProperty("unavailable").asBoolean())
+    {
+      CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(52000), g_localizeStrings.Get(52010), "", "");
+      return;
+    }
+    
+    /* webkit can't be played by PHT */
+    if (file->HasProperty("protocol") && file->GetProperty("protocol").asString() == "webkit")
+    {
+      CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(52000), g_localizeStrings.Get(52011), "", "");
+      return;
+    }
+    
+    /* and we defintely not playing isos. */
+    if (file->HasProperty("isdvd") && file->GetProperty("isdvd").asBoolean())
+    {
+      CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(52000), g_localizeStrings.Get(52012), "", "");
+      return;
+    }
+    
+    // Now see what to do with it.
+    EPlexDirectoryType type = file->GetPlexDirectoryType();
+    if (type == PLEX_DIR_TYPE_TRACK || type == PLEX_DIR_TYPE_ARTIST || type == PLEX_DIR_TYPE_ALBUM)
+    {
+      CFileItemList fileItems;
+      int itemIndex = 0;
+      
+      // Get the most interesting container, for a track this means
+      // the album, for a album it means... the album :) and for
+      // a artist we just play everything by that artist.
+      CStdString key;
+      if (type == PLEX_DIR_TYPE_TRACK)
+      {
+        key = file->GetProperty("parentPath").asString();
+      }
+      else if (type == PLEX_DIR_TYPE_ALBUM)
+      {
+        key = file->GetProperty("key").asString();
+      }
+      else if (type == PLEX_DIR_TYPE_ARTIST)
+      {
+        CURL p(file->GetPath());
+        PlexUtils::AppendPathToURL(p, "allLeaves");
+        key = p.Get();
+      }
+
+      XFILE::CPlexDirectory plexDir;
+      plexDir.GetDirectory(key, fileItems);
+
+      for (int i=0; i < fileItems.Size(); ++i)
+      {
+        CFileItemPtr fileItem = fileItems[i];
+        if (fileItem->GetProperty("unprocessed_key") == file->GetProperty("unprocessed_key"))
+        {
+          itemIndex = i;
+          break;
+        }
+      }
+      
+      g_playlistPlayer.ClearPlaylist(PLAYLIST_MUSIC);
+      g_playlistPlayer.Reset();
+      g_playlistPlayer.Add(PLAYLIST_MUSIC, fileItems);
+      g_playlistPlayer.SetCurrentPlaylist(PLAYLIST_MUSIC);
+      g_playlistPlayer.Play(itemIndex);
+    }
+    else if (type == PLEX_DIR_TYPE_PHOTO)
+    {
+      // Attempt to get the slideshow window
+      CGUIWindowSlideShow *pSlideShow = (CGUIWindowSlideShow *)g_windowManager.GetWindow(WINDOW_SLIDESHOW);
+      if (!pSlideShow)
+        return;
+      
+      // Stop playing video
+      if (g_application.IsPlayingVideo())
+        g_application.StopPlaying();
+      
+      // Reset the window and add each item from the container
+      pSlideShow->Reset();
+      if(container)
+      {
+        BOOST_FOREACH(CGUIListItemPtr child, container->GetItems())
+          pSlideShow->Add((CFileItem *)child.get());
+      }
+      
+      // Set the currently selected photo
+      pSlideShow->Select(file->GetPath());
+      
+      // Start the slideshow and show the window
+      pSlideShow->StartSlideShow();
+      g_windowManager.ActivateWindow(WINDOW_SLIDESHOW);
+    }
+    else
+    {
+      CFileItemPtr rFile = file;
+
+      if (type == PLEX_DIR_TYPE_SHOW)
+      {
+        CFileItemPtr season = GetNextUnwatched(file->GetPath());
+        if (season)
+          rFile = GetNextUnwatched(season->GetPath());
+      }
+      else if (type == PLEX_DIR_TYPE_SEASON)
+      {
+        rFile = GetNextUnwatched(file->GetPath());
+      }
+
+      // If there is more than one media item, allow picking which one.
+      if (ProcessMediaChoice(rFile.get()) == false)
+        return;
+      
+      // See if we're going to resume the playback or not.
+      if (ProcessResumeChoice(rFile.get()) == false)
+        return;
+      
+      // Play it.
+      g_application.PlayFile(*rFile);
+    }
+  }
   
   static bool ProcessResumeChoice(CFileItem* file)
   {
@@ -178,25 +225,38 @@ class PlexContentPlayerMixin
     // If there is more than one media item, allow picking which one.
      if (file->m_mediaItems.size() > 1)
      {
-       bool pickLibraryItem = g_guiSettings.GetBool("videogeneral.alternatemedia");
-       int  onlineQuality   = g_guiSettings.GetInt("videogeneral.onlinemediaquality");
+       int  onlineQuality   = g_guiSettings.GetInt("plexmediaserver.onlinemediaquality");
        bool isLibraryItem   = file->IsPlexMediaServerLibrary();
        
        // See if we're offering a choice.
-       if ((isLibraryItem  && pickLibraryItem) ||
-           (!isLibraryItem && onlineQuality == MEDIA_QUALITY_ALWAYS_ASK))
+       if (isLibraryItem || (!isLibraryItem && onlineQuality == PLEX_ONLINE_QUALITY_ALWAYS_ASK))
        {
-         CFileItemList   fileItems;
          CContextButtons choices;
-         CPlexDirectory  mediaChoices;
          
          for (size_t i=0; i < file->m_mediaItems.size(); i++)
          {
            CFileItemPtr item = file->m_mediaItems[i];
+           int mpartID = item->GetProperty("id").asInteger();
+           if (mpartID == 0)
+             mpartID = i;
            
            CStdString label;
            CStdString videoCodec = CStdString(item->GetProperty("mediaTag-videoCodec").asString()).ToUpper();
            CStdString videoRes = CStdString(item->GetProperty("mediaTag-videoResolution").asString()).ToUpper();
+           
+           CStdString audioCodec = CStdString(item->GetProperty("mediaTag-audioCodec").asString()).ToUpper();
+           if (audioCodec.Equals("DCA"))
+             audioCodec = "DTS";
+           
+           CStdString channelStr;
+           int audioChannels = item->GetProperty("mediaTag-audioChannels").asInteger();
+           
+           if (audioChannels == 1)
+             channelStr = "Mono";
+           else if (audioChannels == 2)
+             channelStr = "Stereo";
+           else
+             channelStr = boost::lexical_cast<std::string>(audioChannels - 1) + ".1";
            
            if (videoCodec.size() == 0 && videoRes.size() == 0)
            {
@@ -211,29 +271,30 @@ class PlexContentPlayerMixin
              label += " " + videoCodec;
            }
            
-           choices.Add(i, label);
+           label += " - ";
+           
+           if (audioCodec.empty())
+             label += "Unknown";
+           else
+             label += channelStr + " " + audioCodec;
+           
+           choices.Add(mpartID, label);
          }
          
          int choice = CGUIDialogContextMenu::ShowAndGetChoice(choices);
          if (choice >= 0)
-         {
-           file->SetPath(file->m_mediaItems[choice]->GetPath());
-           file->SetProperty("localPath", file->m_mediaItems[choice]->GetProperty("localPath"));
-           file->SetProperty("selectedQuality", choices[choice].second);
-         }
+           file->SetProperty("selectedMediaItem", choice);
          else
-         {
            return false;
-         }
        }
        else
        {
          if (isLibraryItem == false)
          {
            // Try to pick something that's equal or less than the preferred resolution.
-           map<int, int> qualityMap;
-           vector<int> qualities;
-           int sd = MEDIA_QUALITY_SD;
+           std::map<int, int> qualityMap;
+           std::vector<int> qualities;
+           int sd = PLEX_ONLINE_QUALITY_SD;
            
            for (size_t i=0; i < file->m_mediaItems.size(); i++)
            {
@@ -261,22 +322,22 @@ class PlexContentPlayerMixin
              if (q <= onlineQuality)
              {
                pickedIndex = qualityMap[q];
-               file->SetPath(file->m_mediaItems[pickedIndex]->GetPath());
-               file->SetProperty("localPath", file->m_mediaItems[pickedIndex]->GetProperty("localPath"));
-               file->SetProperty("selectedQuality", file->m_mediaItems[pickedIndex]->GetProperty("mediaTag-videoResolution").asString());
+               file->SetProperty("selectedMediaItem", file->m_mediaItems[pickedIndex]->GetProperty("id").asInteger());
                break;
              }
            }
          }
        }
      }
+     else
+       file->SetProperty("selectedMediaItem", 0);
      
      return true;
   }
   
  private:
   
-  void ActivateWindow(int window, const CStdString& path)
+  static void ActivateWindow(int window, const CStdString& path)
   {
     CStdString strWindow = (window == WINDOW_VIDEO_FILES) ? "MyVideoFiles" : (window == WINDOW_MUSIC_FILES) ? "MyMusicFiles" : (window == WINDOW_PROGRAMS) ? "MyPrograms" : "MyPictures";
     CStdString cmd = "XBMC.ActivateWindow(" + strWindow + "," + path + ",return)";

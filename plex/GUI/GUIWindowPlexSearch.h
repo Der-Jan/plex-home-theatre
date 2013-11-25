@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- *      Copyright (C) 2011 Plex
+ *      Copyright (C) 2013 Plex
  *      http://www.plexapp.com
  *
  *  This Program is free software; you can redistribute it and/or modify
@@ -20,62 +20,55 @@
  *  http://www.gnu.org/copyleft/gpl.html
  *
  */
+
 #include <map>
 
 #include "FileItem.h"
 #include "guilib/GUIWindow.h"
-#include "pictures/PictureThumbLoader.h"
+#include "JobManager.h"
 #include "PlexContentPlayerMixin.h"
-#include "PlexContentWorker.h"
-#include "Stopwatch.h"
-#include "ThumbLoader.h"
+#include "guilib/GUIEditControl.h"
+#include "PlexGlobalTimer.h"
+#include "threads/CriticalSection.h"
+#include "PlexNavigationHelper.h"
 
-class PlexContentWorkerManager;
-
-class CGUIWindowPlexSearch : public CGUIWindow, 
-                             public PlexContentPlayerMixin
+class CGUIWindowPlexSearch : public CGUIWindow, public PlexContentPlayerMixin, public IJobCallback, public IPlexGlobalTimeout
 {
- public:
-  
-  CGUIWindowPlexSearch();
-  virtual ~CGUIWindowPlexSearch();
-  
-  virtual bool OnAction(const CAction &action);
-  virtual bool OnMessage(CGUIMessage& message);
-  virtual void OnInitWindow();
-  virtual void Render();
-  
-  bool InProgress();
-  
- protected:
-  
-  void Bind();
-  void Reset();
-  void StartSearch(const std::string& search);
-  void Character(WCHAR ch);
-  void Backspace();
-  void UpdateLabel();
-  void OnClickButton(int iButtonControl);
-  void MoveCursor(int iAmount);
-  int  GetCursorPos() const;
-  char GetCharacter(int iButton);
-  
- private:
-  
-  std::string BuildSearchUrl(const std::string& theUrl, const std::string& theQuery);
-  virtual void SaveStateBeforePlay(CGUIBaseContainer* container);
-  
-  CVideoThumbLoader  m_videoThumbLoader;
-  CMusicThumbLoader  m_musicThumbLoader;
-  CStdStringW        m_strEdit;
-  DWORD              m_lastSearchUpdate;
-  DWORD              m_lastArrowKey;
-  bool               m_resetOnNextResults;
-  
-  int                m_selectedContainerID;
-  int                m_selectedItem;
-  
-  std::map<int, Group> m_categoryResults;
-  
-  PlexContentWorkerManager* m_workerManager;
+  public:
+
+    CGUIWindowPlexSearch();
+    virtual ~CGUIWindowPlexSearch();
+
+    virtual bool OnAction(const CAction &action);
+    virtual bool OnMessage(CGUIMessage& message);
+
+    virtual void OnJobComplete(unsigned int jobID, bool success, CJob *job);
+
+    bool InProgress() const
+    {
+      CSingleLock lk(m_threadsSection);
+      return (m_currentSearchId.size() > 0);
+    }
+
+  private:
+    void InitWindow();
+    void UpdateSearch();
+    void OnTimeout();
+    CStdString GetString();
+    void HideAllLists();
+    void ProcessResults(CFileItemList *results);
+    void Reset();
+
+    CGUIEditControl *m_editControl;
+    std::vector<unsigned int> m_currentSearchId;
+    CStdString m_currentSearchString;
+    CCriticalSection m_threadsSection;
+
+    std::map<int, int> m_resultMap;
+    bool OnClick(int senderId, int action);
+
+    CPlexNavigationHelper m_navHelper;
+
+    int m_lastFocusedContainer;
+    int m_lastFocusedItem;
 };

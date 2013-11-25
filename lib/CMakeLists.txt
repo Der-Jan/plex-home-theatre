@@ -10,6 +10,10 @@ if(TARGET_COMMON_LINUX)
   add_subdirectory(xbmc-dll-symbols)
 endif()
 
+if(USE_INTERNAL_FFMPEG)
+  add_subdirectory(ffmpeg)
+endif(USE_INTERNAL_FFMPEG)
+
 if(TARGET_WIN32)
   add_subdirectory(win32)
   add_subdirectory(libmad)
@@ -30,3 +34,4 @@ endif(TARGET_COMMON_DARWIN)
 add_subdirectory(cpluff)
 add_subdirectory(cximage-6.0)
 add_subdirectory(addons)
+

@@ -35,6 +35,7 @@
 #include "DVDInputStreams/DVDInputStreamBluray.h"
 #endif
 #include "DVDInputStreams/DVDInputStreamPVRManager.h"
+#include "DVDInputStreams/DVDInputStreamFFmpeg.h"
 #include "DVDDemuxUtils.h"
 #include "DVDClock.h" // for DVD_TIME_BASE
 #include "commons/Exception.h"
@@ -46,9 +47,11 @@
 #include "threads/Thread.h"
 #include "threads/SystemClock.h"
 #include "utils/TimeUtils.h"
+#include "URL.h"
 
 /* PLEX */
 #include "guilib/LocalizeStrings.h"
+#include "FileSystem/PlexFile.h"
 /* END PLEX */
 
 void CDemuxStreamAudioFFmpeg::GetStreamInfo(std::string& strInfo)
@@ -159,11 +162,9 @@ static void ff_flush_avutil_log_buffers(void)
       ++it;
 }
 
-static XbmcThreads::ThreadLocal<CDVDDemuxFFmpeg> g_demuxer;
-
-static int interrupt_cb(void* unused)
+static int interrupt_cb(void* ctx)
 {
-  CDVDDemuxFFmpeg* demuxer = g_demuxer.get();
+  CDVDDemuxFFmpeg* demuxer = static_cast<CDVDDemuxFFmpeg*>(ctx);
   if(demuxer && demuxer->Aborted())
     return 1;
   return 0;
@@ -180,10 +181,10 @@ static int dvd_file_open(URLContext *h, const char *filename, int flags)
 
 static int dvd_file_read(void *h, uint8_t* buf, int size)
 {
-  if(interrupt_cb(NULL))
-    return -1;
+  if(interrupt_cb(h))
+    return AVERROR_EXIT;
 
-  CDVDInputStream* pInputStream = (CDVDInputStream*)h;
+  CDVDInputStream* pInputStream = static_cast<CDVDDemuxFFmpeg*>(h)->m_pInput;
   return pInputStream->Read(buf, size);
 }
 /*
@@ -194,10 +195,10 @@ static int dvd_file_write(URLContext *h, BYTE* buf, int size)
 */
 static offset_t dvd_file_seek(void *h, offset_t pos, int whence)
 {
-  if(interrupt_cb(NULL))
-    return -1;
+  if(interrupt_cb(h))
+    return AVERROR_EXIT;
 
-  CDVDInputStream* pInputStream = (CDVDInputStream*)h;
+  CDVDInputStream* pInputStream = static_cast<CDVDDemuxFFmpeg*>(h)->m_pInput;
   if(whence == AVSEEK_SIZE)
     return pInputStream->GetLength();
   else
@@ -231,6 +232,10 @@ bool CDVDDemuxFFmpeg::Aborted()
   if(m_timeout.IsTimePast())
     return true;
 
+  CDVDInputStreamFFmpeg * input = dynamic_cast<CDVDInputStreamFFmpeg*>(m_pInput);
+  if(input && input->Aborted())
+    return true;
+
   return false;
 }
 
@@ -240,9 +245,8 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
   std::string strFile;
   m_iCurrentPts = DVD_NOPTS_VALUE;
   m_speed = DVD_PLAYSPEED_NORMAL;
-  g_demuxer.set(this);
   m_program = UINT_MAX;
-  const AVIOInterruptCB int_cb = { interrupt_cb, NULL };
+  const AVIOInterruptCB int_cb = { interrupt_cb, this };
 
   if (!pInput) return false;
 
@@ -274,6 +278,10 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
       iformat = m_dllAvFormat.av_find_input_format("mjpeg");
   }
 
+  // open the demuxer
+  m_pFormatContext  = m_dllAvFormat.avformat_alloc_context();
+  m_pFormatContext->interrupt_callback = int_cb;
+
   // try to abort after 30 seconds
   m_timeout.Set(30000);
 
@@ -281,33 +289,49 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
   {
     // special stream type that makes avformat handle file opening
     // allows internal ffmpeg protocols to be used
+    CURL url = m_pInput->GetURL();
+    CStdString protocol = url.GetProtocol();
+
+    AVDictionary *options = GetFFMpegOptionsFromURL(url);
+
     int result=-1;
-    if (strFile.substr(0,6) == "mms://")
+    if (protocol.Equals("mms"))
     {
       // try mmsh, then mmst
-      CStdString strFile2;
-      strFile2.Format("mmsh://%s",strFile.substr(6,strFile.size()-6).c_str());
-      result = m_dllAvFormat.avformat_open_input(&m_pFormatContext, strFile2.c_str(), iformat, NULL);
+      url.SetProtocol("mmsh");
+      url.SetProtocolOptions("");
+      result = m_dllAvFormat.avformat_open_input(&m_pFormatContext, url.Get().c_str(), iformat, &options);
       if (result < 0)
       {
-        strFile = "mmst://";
-        strFile += strFile2.Mid(7).c_str();
+        url.SetProtocol("mmst");
+        strFile = url.Get();
       } 
     }
-    if (result < 0 && m_dllAvFormat.avformat_open_input(&m_pFormatContext, strFile.c_str(), iformat, NULL) < 0 )
+    /* PLEX - We need to translate the plexserver:// URL here */
+    else if (protocol == "plexserver")
+    {
+      url.SetProtocolOptions("");
+      
+      XFILE::CPlexFile::BuildHTTPURL(url);
+      strFile = url.Get();
+    }
+    /* END PLEX */
+    if (result < 0 && m_dllAvFormat.avformat_open_input(&m_pFormatContext, strFile.c_str(), iformat, &options) < 0 )
     {
       /* PLEX */
       m_pInput->SetError(GetErrorString(result));
       /* END PLEX */
       CLog::Log(LOGDEBUG, "Error, could not open file %s", strFile.c_str());
       Dispose();
+      m_dllAvUtil.av_dict_free(&options);
       return false;
     }
+    m_dllAvUtil.av_dict_free(&options);
   }
   else
   {
     unsigned char* buffer = (unsigned char*)m_dllAvUtil.av_malloc(FFMPEG_FILE_BUFFER_SIZE);
-    m_ioContext = m_dllAvFormat.avio_alloc_context(buffer, FFMPEG_FILE_BUFFER_SIZE, 0, m_pInput, dvd_file_read, NULL, dvd_file_seek);
+    m_ioContext = m_dllAvFormat.avio_alloc_context(buffer, FFMPEG_FILE_BUFFER_SIZE, 0, this, dvd_file_read, NULL, dvd_file_seek);
     m_ioContext->max_packet_size = m_pInput->GetBlockSize();
     if(m_ioContext->max_packet_size)
       m_ioContext->max_packet_size *= FFMPEG_FILE_BUFFER_SIZE / m_ioContext->max_packet_size;
@@ -425,11 +449,9 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
     }
 
 
-    // open the demuxer
-    m_pFormatContext     = m_dllAvFormat.avformat_alloc_context();
     m_pFormatContext->pb = m_ioContext;
 
-    /* PLEX */
+    /* PLEX changed the seterror and friends */
     int res;
     if ((res=m_dllAvFormat.avformat_open_input(&m_pFormatContext, strFile.c_str(), iformat, NULL) < 0))
     {
@@ -440,9 +462,9 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
     }
     /* END PLEX */
   }
-
-  // set the interrupt callback, appeared in libavformat 53.15.0
-  m_pFormatContext->interrupt_callback = int_cb;
+  
+  // Avoid detecting framerate if advancedsettings.xml says so
+  m_pFormatContext->fps_probe_size = (g_advancedSettings.m_videoFpsDetect == 0) ? 0 : -1;
 
   // analyse very short to speed up mjpeg playback start
   if (iformat && (strcmp(iformat->name, "mjpeg") == 0) && m_ioContext->seekable == 0)
@@ -518,8 +540,6 @@ bool CDVDDemuxFFmpeg::Open(CDVDInputStream* pInput)
 
 void CDVDDemuxFFmpeg::Dispose()
 {
-  g_demuxer.set(this);
-
   if (m_pFormatContext)
   {
     if (m_ioContext && m_pFormatContext->pb && m_pFormatContext->pb != m_ioContext)
@@ -566,8 +586,6 @@ void CDVDDemuxFFmpeg::Reset()
 
 void CDVDDemuxFFmpeg::Flush()
 {
-  g_demuxer.set(this);
-
   // naughty usage of an internal ffmpeg function
   if (m_pFormatContext)
     m_dllAvFormat.av_read_frame_flush(m_pFormatContext);
@@ -582,8 +600,6 @@ void CDVDDemuxFFmpeg::Abort()
 
 void CDVDDemuxFFmpeg::SetSpeed(int iSpeed)
 {
-  g_demuxer.set(this);
-
   if(!m_pFormatContext)
     return;
 
@@ -618,6 +634,44 @@ void CDVDDemuxFFmpeg::SetSpeed(int iSpeed)
   }
 }
 
+AVDictionary *CDVDDemuxFFmpeg::GetFFMpegOptionsFromURL(const CURL &url)
+{
+  CStdString protocol = url.GetProtocol();
+
+  AVDictionary *options = NULL;
+
+  if (protocol.Equals("http") || protocol.Equals("https"))
+  {
+    std::map<CStdString, CStdString> protocolOptions;
+    url.GetProtocolOptions(protocolOptions);
+    std::string headers;
+    bool hasUserAgent = false;
+    for(std::map<CStdString, CStdString>::const_iterator it = protocolOptions.begin(); it != protocolOptions.end(); ++it)
+    {
+      const CStdString &name = it->first;
+      const CStdString &value = it->second;
+
+      if (name.Equals("seekable"))
+        m_dllAvUtil.av_dict_set(&options, "seekable", value.c_str(), 0);
+      else if (name.Equals("User-Agent"))
+      {
+        m_dllAvUtil.av_dict_set(&options, "user-agent", value.c_str(), 0);
+        hasUserAgent = true;
+      }
+      else if (!name.Equals("auth") && !name.Equals("Encoding"))
+        // all other protocol options can be added as http header.
+        headers.append(name).append(": ").append(value).append("\r\n");
+    }
+    if (!hasUserAgent)
+      // set default xbmc user-agent.
+      m_dllAvUtil.av_dict_set(&options, "user-agent", "Mozilla/5.0 (Windows; U; Windows NT 5.1; fr; rv:1.9.2b4) Gecko/20091124 Firefox/3.6b4 (.NET CLR 3.5.30729)", 0);
+
+    if (!headers.empty())
+      m_dllAvUtil.av_dict_set(&options, "headers", headers.c_str(), 0);
+  }
+  return options;
+}
+
 double CDVDDemuxFFmpeg::ConvertTimestamp(int64_t pts, int den, int num)
 {
   if (pts == (int64_t)AV_NOPTS_VALUE)
@@ -644,8 +698,6 @@ double CDVDDemuxFFmpeg::ConvertTimestamp(int64_t pts, int den, int num)
 
 DemuxPacket* CDVDDemuxFFmpeg::Read()
 {
-  g_demuxer.set(this);
-
   AVPacket pkt;
   DemuxPacket* pPacket = NULL;
   // on some cases where the received packet is invalid we will need to return an empty packet (0 length) otherwise the main loop (in CDVDPlayer)
@@ -827,8 +879,6 @@ DemuxPacket* CDVDDemuxFFmpeg::Read()
 
 bool CDVDDemuxFFmpeg::SeekTime(int time, bool backwords, double *startpts)
 {
-  g_demuxer.set(this);
-
   if(time < 0)
     time = 0;
 
@@ -887,8 +937,6 @@ bool CDVDDemuxFFmpeg::SeekTime(int time, bool backwords, double *startpts)
 
 bool CDVDDemuxFFmpeg::SeekByte(int64_t pos)
 {
-  g_demuxer.set(this);
-
   CSingleLock lock(m_critSection);
   int ret = m_dllAvFormat.av_seek_frame(m_pFormatContext, -1, pos, AVSEEK_FLAG_BYTE);
 

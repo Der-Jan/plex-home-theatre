@@ -645,7 +645,7 @@ bool CDVDVideoCodecVDA::Open(CDVDStreamInfo &hints, CDVDCodecOptions &options)
     m_dll = new DllLibVDADecoder;
     if (!m_dll->Load())
     {
-      CLog::Log(LOGNOTICE, "%s - DllLibVDADecoder load failed", __FUNCTION__, hints.profile);
+      CLog::Log(LOGNOTICE, "%s - DllLibVDADecoder load failed", __FUNCTION__);
       return false;
     }
     g_DllLibVDADecoder = m_dll;
@@ -808,13 +808,8 @@ bool CDVDVideoCodecVDA::Open(CDVDStreamInfo &hints, CDVDCodecOptions &options)
     if (rendervendor.find("nvidia") != std::string::npos)
     {
       // Nvidia gpu's are all powerful and work the way god intended
-
       m_decode_async = true;
-#ifndef __PLEX__ // my testing shows me that cvBufferRef is NOT working on nvidia
       m_use_cvBufferRef = false;
-#else
-      m_use_cvBufferRef = true;
-#endif
     }
     else if (rendervendor.find("intel") != std::string::npos)
     {
@@ -826,7 +821,7 @@ bool CDVDVideoCodecVDA::Open(CDVDStreamInfo &hints, CDVDCodecOptions &options)
     {
       // ATI gpu's are borked when using async decode
       m_decode_async = false;
-      m_use_cvBufferRef = true;
+      m_use_cvBufferRef = false;
     }
 
     if (!m_use_cvBufferRef)

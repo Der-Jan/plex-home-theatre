@@ -23,6 +23,7 @@
 #include "ThumbLoader.h"
 #include "utils/JobManager.h"
 #include "FileItem.h"
+#include "PlexJobs.h"
 
 #define kJobTypeMediaFlags "mediaflags"
 
@@ -39,7 +40,7 @@ public:
 
   static bool FillThumb(CFileItem &item);
   
-  static vector<string> GetArtTypes(const string &type);
+  static std::vector<std::string> GetArtTypes(const std::string &type);
   
   static std::string GetLocalArt(const CFileItem &item, const std::string &type, bool checkFolder);
   
@@ -48,4 +49,27 @@ public:
 private:
   virtual void OnLoaderStart();
   virtual void OnLoaderFinish();
+};
+
+class CPlexThumbCacher : public CJobQueue
+{
+public:
+  CPlexThumbCacher() : CJobQueue(true, 5, CJob::PRIORITY_LOW), m_stop(false) {};
+  ~CPlexThumbCacher() {}
+  void Stop() { m_stop = true; CancelJobs(); }
+  void Start() { m_stop = false; }
+  void Load(const CFileItemList &list)
+  {
+    if (m_stop)
+      return;
+
+    for (int i = 0; i < list.Size(); i++)
+    {
+      CFileItemPtr item = list.Get(i);
+      if (item->IsPlexMediaServer())
+        AddJob(new CPlexVideoThumbLoaderJob(item));
+    }
+  }
+
+  bool m_stop;
 };

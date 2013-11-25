@@ -338,24 +338,29 @@
 
 /* PLEX */
 #include "plex/PlexApplication.h"
-#include "plex/Players/PlexMediaServerPlayer.h"
-#include "plex/PlexMediaServerQueue.h"
-#include "plex/MyPlexManager.h"
-#include "plex/PlexServerManager.h"
+#include "Client/PlexMediaServerClient.h"
+#include "plex/Client/PlexServerManager.h"
 #include "plex/Helper/PlexHTHelper.h"
 #include "plex/GUI/GUIDialogRating.h"
 #include "plex/GUI/GUIWindowSharedContent.h"
 #include "plex/GUI/GUIDialogTimer.h"
 #include "plex/GUI/GUIWindowNowPlaying.h"
 #include "plex/GUI/GUIWindowPlexSearch.h"
-#include "plex/Utility/BackgroundMusicPlayer.h"
 #include "plex/GUI/GUIPlexMediaWindow.h"
 #include "plex/GUI/GUIDialogFilterSort.h"
-#include "plex/GUI/GUIPlexMusicWindow.h"
-#include "plex/GUI/GUIDialogMyPlexPin.h"
+#include "plex/GUI/GUIWindowMyPlex.h"
 #include "plex/GUI/GUIDialogPlexPluginSettings.h"
-   
+#include "plex/GUI/GUIWindowPlexPreplayVideo.h"
+#include "plex/GUI/GUIWindowPlexMyChannels.h"
 #include "settings/GUISettings.h"
+#include "plex/PlexMediaDecisionEngine.h"
+#include "plex/Remote/PlexHTTPRemoteHandler.h"
+#include "plex/Remote/PlexRemoteSubscriberManager.h"
+#include "plex/CrashReporter/Breakpad.h"
+#include "plex/GUI/GUIDialogPlexAudioSubtitlePicker.h"
+#include "plex/GUI/GUIWindowPlexStartupHelper.h"
+#include "plex/PlexThemeMusicPlayer.h"
+#include "video/dialogs/GUIDialogVideoOSD.h"
 /* END PLEX */
 
 #if defined(TARGET_ANDROID)
@@ -412,7 +417,11 @@ CApplication::CApplication(void)
   , m_videoInfoScanner(new CVideoInfoScanner)
   , m_musicInfoScanner(new CMusicInfoScanner)
   , m_seekHandler(new CSeekHandler)
-  , m_pLaunchHost(NULL) /* PLEX */
+  /* PLEX */
+  , m_plexRemoteHandler(*new CPlexHTTPRemoteHandler)
+  , m_pLaunchHost(NULL)
+  , m_returnFromAutoUpdate(false)
+  /* END PLEX */
 {
   m_network = NULL;
   TiXmlBase::SetCondenseWhiteSpace(false);
@@ -465,9 +474,6 @@ CApplication::CApplication(void)
   m_lastRenderTime = 0;
   m_bTestMode = false;
 
-  /* PLEX */
-  m_bPlaybackInFullScreen = false;
-  /* END PLEX */
 }
 
 CApplication::~CApplication(void)
@@ -792,6 +798,7 @@ bool CApplication::Create()
     g_curlInterface.Load();
   g_curlInterface.global_init(CURL_GLOBAL_ALL);
 #endif
+  /* END PLEX */
 
   CLog::Log(LOGINFO, "creating subdirectories");
   CLog::Log(LOGINFO, "userdata folder: %s", g_settings.GetProfileUserDataFolder().c_str());
@@ -802,6 +809,13 @@ bool CApplication::Create()
   g_settings.CreateProfileFolders();
 
   update_emu_environ();//apply the GUI settings
+
+  /* PLEX */
+  /* now that we have our directories we can fire up our crashreporter */
+#if defined(HAVE_BREAKPAD) && !defined(_DEBUG)
+  m_breakpad = new BreakpadScope("PLEX HOME THEATER");
+#endif
+  /* PLEX */
 
   // initialize our charset converter
   g_charsetConverter.reset();
@@ -840,9 +854,6 @@ bool CApplication::Create()
   // initialize the addon database (must be before the addon manager is init'd)
   CDatabaseManager::Get().Initialize(true);
 
-  g_plexApplication.Start();
-  /* END PLEX */
-
   // start-up Addons Framework
   // currently bails out if either cpluff Dll is unavailable or system dir can not be scanned
   if (!CAddonMgr::Get().Init())
@@ -877,6 +888,11 @@ bool CApplication::Create()
 
   m_lastFrameTime = XbmcThreads::SystemClockMillis();
   m_lastRenderTime = m_lastFrameTime;
+  
+  /* PLEX */
+  g_plexApplication.Start();
+  /* END PLEX */
+  
   return true;
 }
 
@@ -919,15 +935,21 @@ bool CApplication::CreateGUI()
   g_Windowing.EnableSystemScreenSaver(false);
 
 #ifdef HAS_SDL
+    /* PLEX - We don't want SDL signal handler */
+  sdlFlags |= SDL_INIT_NOPARACHUTE;
+  /* END PLEX */
+
   if (SDL_Init(sdlFlags) != 0)
   {
     CLog::Log(LOGFATAL, "XBAppEx: Unable to initialize SDL: %s", SDL_GetError());
     return false;
   }
+#ifndef __PLEX__
   #if defined(TARGET_DARWIN)
   // SDL_Init will install a handler for segfaults, restore the default handler.
   signal(SIGSEGV, SIG_DFL);
   #endif
+#endif
 #endif
 
   // Initialize core peripheral port support. Note: If these parameters
@@ -1003,14 +1025,22 @@ bool CApplication::InitWindow()
   // force initial window creation to be windowed, if fullscreen, it will switch to it below
   // fixes the white screen of death if starting fullscreen and switching to windowed.
   bool bFullScreen = false;
+#ifndef __PLEX__
   if (!g_Windowing.CreateNewWindow("XBMC", bFullScreen, g_settings.m_ResInfo[RES_WINDOW], OnEvent))
+#else
+  if (!g_Windowing.CreateNewWindow("Plex Home Theater", bFullScreen, g_settings.m_ResInfo[RES_WINDOW], OnEvent))
+#endif
   {
     CLog::Log(LOGFATAL, "CApplication::Create: Unable to create window");
     return false;
   }
 #else
   bool bFullScreen = g_guiSettings.m_LookAndFeelResolution != RES_WINDOW;
+#ifndef __PLEX__
   if (!g_Windowing.CreateNewWindow("XBMC", bFullScreen, g_settings.m_ResInfo[g_guiSettings.m_LookAndFeelResolution], OnEvent))
+#else
+  if (!g_Windowing.CreateNewWindow("Plex Home Theater", bFullScreen, g_settings.m_ResInfo[g_guiSettings.m_LookAndFeelResolution], OnEvent))
+#endif
   {
     CLog::Log(LOGFATAL, "CApplication::Create: Unable to create window");
     return false;
@@ -1337,6 +1367,9 @@ bool CApplication::Initialize()
 #ifdef HAS_WEB_SERVER
   CWebServer::RegisterRequestHandler(&m_httpImageHandler);
   CWebServer::RegisterRequestHandler(&m_httpVfsHandler);
+  /* PLEX */
+  CWebServer::RegisterRequestHandler(&m_plexRemoteHandler);
+  /* END PLEX */
 #ifdef HAS_JSONRPC
   CWebServer::RegisterRequestHandler(&m_httpJsonRpcHandler);
 #endif
@@ -1355,8 +1388,8 @@ bool CApplication::Initialize()
     g_guiSettings.GetSetting("powermanagement.displaysoff")->SetVisible(m_dpms->IsSupported());
     g_windowManager.Add(new CGUIWindowHome);
     g_windowManager.Add(new CGUIWindowPrograms);
-    g_windowManager.Add(new CGUIWindowPictures);
 #ifndef __PLEX__
+    g_windowManager.Add(new CGUIWindowPictures);
     g_windowManager.Add(new CGUIWindowFileManager);
 #endif
     g_windowManager.Add(new CGUIWindowSettings);
@@ -1371,8 +1404,10 @@ bool CApplication::Initialize()
 #endif
     g_windowManager.Add(new CGUIWindowSettingsScreenCalibration);
     g_windowManager.Add(new CGUIWindowSettingsCategory);
+#ifndef __PLEX__
     g_windowManager.Add(new CGUIWindowVideoNav);
     g_windowManager.Add(new CGUIWindowVideoPlaylist);
+#endif
     g_windowManager.Add(new CGUIWindowLoginScreen);
     g_windowManager.Add(new CGUIWindowSettingsProfile);
     g_windowManager.Add(new CGUIWindow(WINDOW_SKIN_SETTINGS, "SkinSettings.xml"));
@@ -1435,12 +1470,15 @@ bool CApplication::Initialize()
     
     g_windowManager.Add(new CGUIDialogMediaFilter);
 
+#ifndef __PLEX__
     g_windowManager.Add(new CGUIWindowMusicPlayList);
     g_windowManager.Add(new CGUIWindowMusicSongs);
     g_windowManager.Add(new CGUIWindowMusicNav);
     g_windowManager.Add(new CGUIWindowMusicPlaylistEditor);
+#endif
 
     /* Load PVR related Windows and Dialogs */
+#ifndef __PLEX__
     g_windowManager.Add(new CGUIDialogTeletext);
     g_windowManager.Add(new CGUIWindowPVR);
     g_windowManager.Add(new CGUIDialogPVRGuideInfo);
@@ -1453,6 +1491,7 @@ bool CApplication::Initialize()
     g_windowManager.Add(new CGUIDialogPVRGuideOSD);
     g_windowManager.Add(new CGUIDialogPVRDirectorOSD);
     g_windowManager.Add(new CGUIDialogPVRCutterOSD);
+#endif
 
     g_windowManager.Add(new CGUIDialogSelect);
     g_windowManager.Add(new CGUIDialogMusicInfo);
@@ -1481,17 +1520,26 @@ bool CApplication::Initialize()
     g_windowManager.Add(new CGUIDialogRating);                 // window id = 200
     g_windowManager.Add(new CGUIDialogTimer);                 // window id = 201
     g_windowManager.Add(new CGUIDialogFilterSort);
-#if 0 // Add these later to enable filtering again
     g_windowManager.Add(new CGUIPlexMediaWindow);
     g_windowManager.Add(new CGUIPlexMusicWindow);
-#endif
-    g_windowManager.Add(new CGUIDialogMyPlexPin);
+    g_windowManager.Add(new CGUIWindowPlexPreplayVideo);
+    g_windowManager.Add(new CGUIWindowMyPlex);
     g_windowManager.Add(new CGUIDialogPlexPluginSettings);
+    g_windowManager.Add(new CGUIWindowPlexMyChannels);
+    g_windowManager.Add(new CGUIDialogPlexAudioPicker);
+    g_windowManager.Add(new CGUIDialogPlexSubtitlePicker);
+    g_windowManager.Add(new CGUIWindowPlexStartupHelper);
+    g_windowManager.Add(new CGUIPlexPictureWindow);
     /* END PLEX */
 
     /* window id's 3000 - 3100 are reserved for python */
 
     // Make sure we have at least the default skin
+    /* PLEX select plex skin if it's the first time you run it with mediastream */
+    if (g_guiSettings.GetString("lookandfeel.skin") != DEFAULT_SKIN && !g_guiSettings.GetBool("system.firstrunwizard"))
+      g_guiSettings.SetString("lookandfeel.skin", DEFAULT_SKIN);
+    /* END PLEX */
+
     if (!LoadSkin(g_guiSettings.GetString("lookandfeel.skin")) && !LoadSkin(DEFAULT_SKIN))
     {
         CLog::Log(LOGERROR, "Default skin '%s' not found! Terminating..", DEFAULT_SKIN);
@@ -1516,6 +1564,7 @@ bool CApplication::Initialize()
 #ifdef HAS_JSONRPC
       CJSONRPC::Initialize();
 #endif
+#ifndef __PLEX__
       ADDON::CAddonMgr::Get().StartServices(false);
       if (g_SkinInfo->GetFirstWindow() == WINDOW_PVR)
       {
@@ -1527,6 +1576,15 @@ bool CApplication::Initialize()
         StartPVRManager(false);
         g_windowManager.ActivateWindow(g_SkinInfo->GetFirstWindow());
       }
+#else
+      if (g_SkinInfo->HasSkinFile("PlexStartupHelper.xml") && !g_guiSettings.GetBool("system.firstrunwizard"))
+      {
+        g_windowManager.ActivateWindow(WINDOW_PLEX_STARTUP_HELPER);
+        g_guiSettings.SetBool("system.firstrunwizard", true);
+      }
+      else
+        g_windowManager.ActivateWindow(g_SkinInfo->GetFirstWindow());
+#endif
     }
 
   }
@@ -1671,11 +1729,7 @@ bool CApplication::StartServer(enum ESERVERS eServer, bool bStart, bool bWait/* 
 bool CApplication::StartWebServer()
 {
 #ifdef HAS_WEB_SERVER
-#ifndef __PLEX__
   if (g_guiSettings.GetBool("services.webserver") && m_network->IsAvailable())
-#else /* Always start the webserver */
-  if (m_network->IsAvailable())
-#endif
   {
     int webPort = atoi(g_guiSettings.GetString("services.webserverport"));
     CLog::Log(LOGNOTICE, "Webserver: Starting...");
@@ -2537,8 +2591,6 @@ void CApplication::Render()
     g_graphicsContext.Flip(dirtyRegions);
   CTimeUtils::UpdateFrameTime(flip);
 
-  g_TextureManager.FreeUnusedTextures();
-
   g_renderManager.UpdateResolution();
   g_renderManager.ManageCaptures();
 
@@ -2635,17 +2687,18 @@ bool CApplication::OnKey(const CKey& key)
     // to map key->action
 
     // first determine if we should use keyboard input directly
-#ifndef __PLEX__
     bool useKeyboard = key.FromKeyboard() && (iWin == WINDOW_DIALOG_KEYBOARD || iWin == WINDOW_DIALOG_NUMERIC);
-#else
-    bool useKeyboard = key.FromKeyboard() && (iWin == WINDOW_DIALOG_KEYBOARD || iWin == WINDOW_DIALOG_NUMERIC || iWin == WINDOW_PLEX_SEARCH);
-#endif
     CGUIWindow *window = g_windowManager.GetWindow(iWin);
     if (window)
     {
       CGUIControl *control = window->GetFocusedControl();
       if (control)
       {
+        /* PLEX */
+        if (iWin == WINDOW_PLEX_SEARCH && control->GetID() >= 64 && control->GetID() <= 100)
+          useKeyboard = true;
+        /* END PLEX */
+
         // If this is an edit control set usekeyboard to true. This causes the
         // keypress to be processed directly not through the key mappings.
         if (control->GetControlType() == CGUIControl::GUICONTROL_EDIT)
@@ -3433,7 +3486,18 @@ bool CApplication::ProcessEventServer(float frameTime)
   {
     CPoint pos;
     if (es->GetMousePos(pos.x, pos.y) && g_Mouse.IsEnabled())
+    {
+      XBMC_Event newEvent;
+      newEvent.type = XBMC_MOUSEMOTION;
+      newEvent.motion.xrel = 0;
+      newEvent.motion.yrel = 0;
+      newEvent.motion.state = 0;
+      newEvent.motion.which = 0x10;  // just a different value to distinguish between mouse and event client device.
+      newEvent.motion.x = pos.x;
+      newEvent.motion.y = pos.y;
+      OnEvent(newEvent);  // had to call this to update g_Mouse position
       return OnAction(CAction(ACTION_MOUSE_MOVE, pos.x, pos.y));
+    }
   }
 #endif
   return false;
@@ -3518,12 +3582,16 @@ bool CApplication::Cleanup()
   try
   {
     /* PLEX */
+    g_windowManager.Delete(WINDOW_PLEX_MYCHANNELS);
     g_windowManager.Delete(WINDOW_SHARED_CONTENT);
     g_windowManager.Delete(WINDOW_NOW_PLAYING);
     g_windowManager.Delete(WINDOW_PLEX_SEARCH);
     g_windowManager.Delete(WINDOW_DIALOG_TIMER);
     g_windowManager.Delete(WINDOW_DIALOG_RATING);
     g_windowManager.Delete(WINDOW_DIALOG_FILTER_SORT);
+    g_windowManager.Delete(WINDOW_DIALOG_PLEX_AUDIO_PICKER);
+    g_windowManager.Delete(WINDOW_DIALOG_PLEX_SUBTITLE_PICKER);
+    g_windowManager.Delete(WINDOW_PLEX_STARTUP_HELPER);
     /* END PLEX */
 
     g_windowManager.Delete(WINDOW_MUSIC_PLAYLIST);
@@ -3707,7 +3775,7 @@ void CApplication::Stop(int exitCode)
 #ifndef __PLEX__
     SaveFileState(true);
 #else
-    UpdateFileState("stop");
+    UpdateFileState("stopped");
 #endif
     
     /* PLEX */
@@ -3718,12 +3786,6 @@ void CApplication::Stop(int exitCode)
     
     if (m_pLaunchHost)
       m_pLaunchHost->OnShutdown();
-
-#ifdef TARGET_WINDOWS
-    ExitProcess(exitCode);
-#else
-    _exit(exitCode);
-#endif
     /* END PLEX */
 
     // cancel any jobs from the jobmanager
@@ -3736,18 +3798,6 @@ void CApplication::Stop(int exitCode)
 
     CLog::Log(LOGNOTICE, "Storing total System Uptime");
     g_settings.m_iSystemTimeTotalUp = g_settings.m_iSystemTimeTotalUp + (int)(CTimeUtils::GetFrameTime() / 60000);
-
-    /* PLEX */
-    // Make sure background loader threads are all dead.
-    CBackgroundRunner::StopAll();
-    for (int i=0; CBackgroundRunner::GetNumActive() != 0 && i<120; i++)
-    {
-      CApplicationMessenger::Get().ProcessMessages();
-      Sleep(50);
-    }
-
-    g_backgroundMusicPlayer.Die();
-    /* END PLEX */
 
     // Update the settings information (volume, uptime etc. need saving)
     if (CFile::Exists(g_settings.GetSettingsFile()))
@@ -3780,6 +3830,9 @@ void CApplication::Stop(int exitCode)
 #ifdef HAS_WEB_SERVER
   CWebServer::UnregisterRequestHandler(&m_httpImageHandler);
   CWebServer::UnregisterRequestHandler(&m_httpVfsHandler);
+  /* PLEX */
+  CWebServer::UnregisterRequestHandler(&m_plexRemoteHandler);
+  /* END PLEX */
 #ifdef HAS_JSONRPC
   CWebServer::UnregisterRequestHandler(&m_httpJsonRpcHandler);
   CJSONRPC::Cleanup();
@@ -3839,10 +3892,6 @@ void CApplication::Stop(int exitCode)
     /* END PLEX */
 #endif
 #endif
-
-    /* PLEX */
-    PlexMediaServerQueue::Get().StopThread();
-    /* END PLEX */
 
 #if defined(HAVE_LIBCRYSTALHD)
     CCrystalHD::RemoveInstance();
@@ -4036,30 +4085,17 @@ bool CApplication::PlayStack(const CFileItem& item, bool bRestart)
       dbs.Close();
     }
 
-
     // calculate the total time of the stack
     CStackDirectory dir;
     dir.GetDirectory(item.GetPath(), *m_currentStack);
 
     /* PLEX */
-    // Move local paths in.
-    if (item.HasProperty("localPath"))
-    {
-      CFileItemList stackedItems;
-      dir.GetDirectory(item.GetProperty("localPath").asString(), stackedItems);
-      for (int i=0; i<stackedItems.Size(); i++)
-        (*m_currentStack)[i]->SetProperty("localPath", stackedItems[i]->GetPath());
-    }
+    CPlexMediaDecisionEngine::ProcessStack(item, *m_currentStack);
     /* END PLEX */
 
     long totalTime = 0;
     for (int i = 0; i < m_currentStack->Size(); i++)
     {
-
-      /* PLEX */
-      (*m_currentStack)[i]->SetProperty("partIndex", i);
-      /* END PLEX */
-
       if (haveTimes)
         (*m_currentStack)[i]->m_lEndOffset = times[i];
       else
@@ -4069,14 +4105,12 @@ bool CApplication::PlayStack(const CFileItem& item, bool bRestart)
 #else
         /* PLEX */
         int duration = 0;
-        if (item.m_mediaParts.size() > (unsigned int)i && item.m_mediaParts[i]->duration > 0)
-        {
-          duration = item.m_mediaParts[i]->duration;
-        }
+        if ((*m_currentStack)[i]->HasProperty("duration"))
+          duration = (*m_currentStack)[i]->GetProperty("duration").asInteger();
         /* END PLEX */
 #endif
 
-        if (!CDVDFileInfo::GetFileDuration((*m_currentStack)[i]->GetPath(), duration))
+        else if (!CDVDFileInfo::GetFileDuration((*m_currentStack)[i]->GetPath(), duration))
         {
           m_currentStack->Clear();
           return false;
@@ -4112,10 +4146,10 @@ bool CApplication::PlayStack(const CFileItem& item, bool bRestart)
 #endif
 
     /* PLEX */
-    if (!haveTimes || item.m_lStartOffset == STARTOFFSET_RESUME)
+    if (item.m_lStartOffset == STARTOFFSET_RESUME)
     {
       // See if we have a view offset.
-      if (item.HasProperty("viewOffset") && item.GetProperty("viewOffset").empty() == false)
+      if (item.HasProperty("viewOffset"))
         seconds = boost::lexical_cast<float>(item.GetProperty("viewOffset").asString())/1000.0;
       else
         seconds = 0.0f;
@@ -4147,8 +4181,9 @@ bool CApplication::PlayStack(const CFileItem& item, bool bRestart)
   return false;
 }
 
-bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
+bool CApplication::PlayFile(const CFileItem& item_, bool bRestart)
 {
+  CFileItem item(item_);
   if (!bRestart)
   {
     SaveCurrentFileSettings();
@@ -4209,8 +4244,22 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
   }
 #endif
 
-  /* PLEX */
-  BackgroundMusicPlayer::SendThemeChangeMessage();
+  if (item.IsPlexMediaServer())
+  {
+    CFileItem newItem;
+    CPlexMediaDecisionEngine plexMDE;
+    if (plexMDE.BlockAndResolve(item, newItem))
+    {
+      newItem.SetProperty("viewOffset", item.GetProperty("viewOffset"));
+      newItem.m_lStartOffset = item.m_lStartOffset;
+      newItem.m_lEndOffset = item.m_lEndOffset;
+
+      item = newItem;
+
+      if (!m_itemCurrentFile->IsStack())
+        *m_itemCurrentFile = newItem;
+    }
+  }
   /* END PLEX */
 
   // if we have a stacked set of files, we need to setup our stack routines for
@@ -4248,7 +4297,7 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
   }
 
   /* PLEX */
-  PlexServerPtr bestServer = PlexServerManager::Get().bestServer();
+  CPlexServerPtr bestServer = g_plexApplication.serverManager->GetBestServer();
   /* END PLEX */
 
   CPlayerOptions options;
@@ -4263,7 +4312,10 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
 
   PLAYERCOREID eNewCore = EPC_NONE;
   /* PLEX */
-  if (bestServer && bestServer->local == false && item.IsPlexWebkit())
+  if (bestServer &&
+      bestServer->GetActiveConnection() &&
+      bestServer->GetActiveConnection()->IsLocal() == false &&
+      item.IsPlexWebkit())
   {
     eNewCore = EPC_DVDPLAYER;
   }
@@ -4350,8 +4402,12 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
 
   // this really aught to be inside !bRestart, but since PlayStack
   // uses that to init playback, we have to keep it outside
+#ifndef __PLEX__
   int playlist = g_playlistPlayer.GetCurrentPlaylist();
   if (item.IsVideo() && g_playlistPlayer.GetPlaylist(playlist).size() > 1)
+#else
+  if (item.IsVideo() && g_playlistPlayer.GetPlaylist(PLAYLIST_VIDEO).size() > 1)
+#endif
   { // playing from a playlist by the looks
     // don't switch to fullscreen if we are not playing the first item...
     options.fullscreen = !g_playlistPlayer.HasPlayedFirstFile() && g_advancedSettings.m_fullScreenOnMovieStart && !g_settings.m_bStartVideoWindowed;
@@ -4408,6 +4464,10 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
   bool bResult;
   if (m_pPlayer)
   {
+    /* PLEX */
+    g_plexApplication.themeMusicPlayer->pauseThemeMusic();
+    /* END PLEX */
+
     // don't hold graphicscontext here since player
     // may wait on another thread, that requires gfx
     CSingleExit ex(g_graphicsContext);
@@ -4421,10 +4481,6 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
 
   if(bResult)
   {
-    /* PLEX */
-    g_backgroundMusicPlayer.PauseElevatorMusic();
-    /* END PLEX */
-
     if (m_iPlaySpeed != 1)
     {
       int iSpeed = m_iPlaySpeed;
@@ -4453,9 +4509,7 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
 
       // if player didn't manange to switch to fullscreen by itself do it here
       //if( options.fullscreen && g_renderManager.IsStarted()
-      /* PLEX */
-      if(m_bPlaybackInFullScreen && g_renderManager.IsStarted()
-      /* END PLEX */
+      if(options.fullscreen && g_renderManager.IsStarted()
        && g_windowManager.GetActiveWindow() != WINDOW_FULLSCREEN_VIDEO )
        SwitchToFullScreen();
     }
@@ -4592,10 +4646,6 @@ void CApplication::OnPlayBackStopped()
   CGUIMessage msg( GUI_MSG_PLAYBACK_STOPPED, 0, 0 );
   g_windowManager.SendThreadMessage(msg);
 
-  /* PLEX */
-  g_backgroundMusicPlayer.PlayElevatorMusic();
-  /* END PLEX */
-
 }
 
 void CApplication::OnPlayBackPaused()
@@ -4608,6 +4658,12 @@ void CApplication::OnPlayBackPaused()
   param["player"]["speed"] = 0;
   param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
   CAnnouncementManager::Announce(Player, "xbmc", "OnPause", m_itemCurrentFile, param);
+
+  /* PLEX */
+  CGUIDialogVideoOSD *osd = (CGUIDialogVideoOSD*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_OSD);
+  if (IsPlayingVideo() && osd && !osd->IsActive())
+    CApplicationMessenger::Get().DoModal(osd, WINDOW_DIALOG_VIDEO_OSD, "pauseOpen", false);
+  /* END PLEX */
 }
 
 void CApplication::OnPlayBackResumed()
@@ -4620,6 +4676,12 @@ void CApplication::OnPlayBackResumed()
   param["player"]["speed"] = 1;
   param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
   CAnnouncementManager::Announce(Player, "xbmc", "OnPlay", m_itemCurrentFile, param);
+
+  /* PLEX */
+  CGUIDialogVideoOSD *osd = (CGUIDialogVideoOSD*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_OSD);
+  if (IsPlayingVideo() && osd && osd->IsOpenedFromPause())
+    CApplicationMessenger::Get().Close(osd, false);
+  /* PLEX */
 }
 
 void CApplication::OnPlayBackSpeedChanged(int iSpeed)
@@ -5254,11 +5316,22 @@ bool CApplication::OnMessage(CGUIMessage& message)
       }
 #endif
 
-      // ok - send the file to the player if it wants it
-      if (m_pPlayer && m_pPlayer->QueueNextFile(file))
-      { // player wants the next file
-        m_nextPlaylistItem = iNext;
+      // ok - send the file to the player, if it accepts it
+      if (m_pPlayer)
+      {
+        if (m_pPlayer->QueueNextFile(file))
+        {
+          // player accepted the next file
+          m_nextPlaylistItem = iNext;
+        }
+        else
+        {
+          /* Player didn't accept next file: *ALWAYS* advance playlist in this case so the player can
+             queue the next (if it wants to) and it doesn't keep looping on this song */
+          g_playlistPlayer.SetCurrentSong(iNext);
+        }
       }
+
       return true;
     }
     break;
@@ -5273,11 +5346,11 @@ bool CApplication::OnMessage(CGUIMessage& message)
 #endif
 
       /* PLEX */
-      if (message.GetMessage() == GUI_MSG_PLAYBACK_STOPPED)
-        UpdateFileState("stopped");
-
       if (message.GetMessage() == GUI_MSG_PLAYBACK_STOPPED || message.GetMessage() == GUI_MSG_PLAYBACK_ENDED)
+      {
+        UpdateFileState("stopped");
         HideBusyIndicator();
+      }
       /* END PLEX */
 
 #ifdef TARGET_DARWIN
@@ -5545,6 +5618,8 @@ void CApplication::ProcessSlow()
 
   if (!IsPlayingVideo())
     g_largeTextureManager.CleanupUnusedImages();
+
+  g_TextureManager.FreeUnusedTextures();
 
 #ifdef HAS_DVD_DRIVE
   // checks whats in the DVD drive and tries to autostart the content (xbox games, dvd, cdda, avi files...)
@@ -6284,84 +6359,28 @@ void CApplication::UpdateFileState(const string& aState)
   if (!m_itemCurrentFile)
     return;
 
-  // Update the media server as needed.
-  static time_t lastUpdated = 0;
-  static string lastState;
-  static double lastTime = 0.0;
-  static double latestTime = 0.0;
-  static bool   hasScrobbled = false;
-  static string lastKey;
-
   // Compute the state if not passed on.
-  string state = aState;
-  if (state.empty())
-    state = IsBuffering() ? "buffering" : IsPaused() ? "paused" : "playing";
+  CPlexTimelineManager::MediaState state;
+  if (aState == "paused")
+    state = CPlexTimelineManager::MEDIA_STATE_PAUSED;
+  else if (aState == "playing")
+    state = CPlexTimelineManager::MEDIA_STATE_PLAYING;
+  else if (aState == "buffering")
+    state = CPlexTimelineManager::MEDIA_STATE_BUFFERING;
+  else if (aState == "stopped" )
+    state = CPlexTimelineManager::MEDIA_STATE_STOPPED;
+  else if (aState.empty())
+    state = IsBuffering() ? CPlexTimelineManager::MEDIA_STATE_BUFFERING : IsPaused() ? CPlexTimelineManager::MEDIA_STATE_PAUSED : CPlexTimelineManager::MEDIA_STATE_PLAYING;
+  else
+    return;
 
-  // Keep latest time.
-  double nowTime = GetTime();
-  if (nowTime > 0.0)
-    latestTime = nowTime;
+  if (!m_itemCurrentFile->HasProperty("duration"))
+    m_itemCurrentFile->SetProperty("duration", GetTotalTime());
 
-  // If the item changed, reset things.
-  if (lastKey != m_itemCurrentFile->GetProperty("key").asString())
+  if (state == CPlexTimelineManager::MEDIA_STATE_STOPPED || IsPlayingVideo() || IsPlayingAudio())
   {
-    hasScrobbled = false;
-    latestTime = 0.0;
-  }
-
-  // Every 5 seconds by default.
-  int cadence = 5;
-  if (m_itemCurrentFile->GetProperty("pluginIdentifier") == "com.plexapp.plugins.myplex")
-    cadence = 20;
-
-  if (state == "stopped" || IsPlayingVideo() || IsPlayingAudio())
-  {
-    // Enough time has passed, we changed state, we skipped, or we're playing something different.
-    time_t now = time(0);
-    if (now - lastUpdated > cadence        ||
-        lastState != state                 ||
-        fabs(lastTime-nowTime) > cadence*2 ||
-        lastKey != m_itemCurrentFile->GetProperty("key").asString())
-    {
-      // Update state.
-      lastUpdated = time(0);
-      lastState = state;
-      lastTime = nowTime;
-      lastKey = m_itemCurrentFile->GetProperty("key").asString();
-
-      // If we've stopped, use the most up to date time possible.
-      double t = nowTime;
-      if (state == "stopped")
-        t = latestTime;
-
-      // Update progress.
-      if (hasScrobbled == false)
-      {
-        if (t>5.0)
-        {
-          m_itemCurrentFile->SetProperty("viewOffset", boost::lexical_cast<string>((int)(t*1000)));
-          m_itemCurrentFile->SetOverlayImage(CGUIListItem::ICON_OVERLAY_IN_PROGRESS);
-        }
-
-        PlexMediaServerQueue::Get().onPlayingProgress(m_itemCurrentFile, int(t*1000), state);
-      }
-      else
-      {
-        PlexMediaServerQueue::Get().onPlayTimeline(m_itemCurrentFile, int(t*1000), state);
-      }
-    }
-
-    // See if we should scrobble.
-    if (hasScrobbled == false && GetPercentage() >= g_advancedSettings.m_videoPlayCountMinimumPercent)
-    {
-      hasScrobbled = true;
-
-      // Scrobble.
-      m_itemCurrentFile->GetVideoInfoTag()->m_playCount++;
-      m_itemCurrentFile->SetOverlayImage(CGUIListItem::ICON_OVERLAY_WATCHED);
-      m_itemCurrentFile->ClearProperty("viewOffset");
-      PlexMediaServerQueue::Get().onViewed(m_itemCurrentFile, true);
-    }
+    if (g_plexApplication.timelineManager)
+      g_plexApplication.timelineManager->ReportProgress(m_itemCurrentFile, state, GetTime() * 1000);
 
     // Update the item in place.
     CGUIMediaWindow* mediaWindow = (CGUIMediaWindow* )g_windowManager.GetWindow(WINDOW_VIDEO_FILES);
@@ -6430,10 +6449,7 @@ void CApplication::RestartWithNewPlayer(CGUIDialogCache* cacheDlg, const CStdStr
   // See if we're passing along the cache dialog.
   if (cacheDlg)
   {
-    if (eNewCore == EPC_PMSPLAYER)
-      ((CPlexMediaServerPlayer* )m_pPlayer)->SetCacheDialog(cacheDlg);
-    else
-      cacheDlg->Close();
+    cacheDlg->Close();
   }
 
   PlayFile(*m_itemCurrentFile, false);

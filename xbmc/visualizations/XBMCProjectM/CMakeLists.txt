@@ -49,7 +49,7 @@ endif(APPLE)
 add_definitions(-DHAS_SDL -DHAS_SDL_OPENGL)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format -Wno-parentheses-equality -Wno-enum-conversion -Wno-deprecated-writable-strings -Wno-default-arg-special-member")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format -Wno-parentheses-equality -Wno-enum-conversion -Wno-deprecated-writable-strings")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
 set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${PLEX_LINK_WRAPPED}")

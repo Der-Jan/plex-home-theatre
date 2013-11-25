@@ -236,6 +236,12 @@ static const ActionMapping actions[] =
         {"wheeldown"         , ACTION_MOUSE_WHEEL_DOWN},
         {"mousedrag"         , ACTION_MOUSE_DRAG},
         {"mousemove"         , ACTION_MOUSE_MOVE},
+  
+        /* PLEX */
+        {"markaswatched"     , ACTION_MARK_AS_WATCHED},
+        {"markasunwatched"   , ACTION_MARK_AS_UNWATCHED},
+        {"clearfilters"      , ACTION_CLEAR_FILTERS},
+        /* END PLEX */
 
         // Do nothing action
         { "noop"             , ACTION_NOOP}
@@ -244,9 +250,14 @@ static const ActionMapping actions[] =
 static const ActionMapping windows[] =
        {{"home"                     , WINDOW_HOME},
         /* PLEX */
+        {"channels"                 , WINDOW_PLEX_MYCHANNELS},
         {"sharedcontent"            , WINDOW_SHARED_CONTENT},
         {"nowplaying"               , WINDOW_NOW_PLAYING},
         {"plexsearch"               , WINDOW_PLEX_SEARCH},
+        {"plexpreplayvideo"         , WINDOW_PLEX_PREPLAY_VIDEO},
+        {"plexpreplaymusic"         , WINDOW_PLEX_PREPLAY_MUSIC},
+        {"myplexlogin"              , WINDOW_MYPLEX_LOGIN},
+        {"filterdialog"             , WINDOW_DIALOG_FILTER_SORT},
         /* END PLEX */
         {"programs"                 , WINDOW_PROGRAMS},
         {"pictures"                 , WINDOW_PICTURES},

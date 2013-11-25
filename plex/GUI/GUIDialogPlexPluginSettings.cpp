@@ -16,6 +16,7 @@
 #include "GUILabelControl.h"
 #include "GUIRadioButtonControl.h"
 #include "GUISpinControlEx.h"
+#include "GUIEditControl.h"
 #include "Util.h"
 #include "FileItem.h"
 #include "filesystem/File.h"
@@ -38,6 +39,9 @@
 #define ID_BUTTON_DEFAULT               12
 #define CONTROL_HEADING_LABEL           20
 #define CONTROL_START_CONTROL           100
+
+using namespace std;
+using namespace XFILE;
 
 ////////////////////////////////////////////////////////////////////////////////
 void CPlexPluginSettings::Set(const CStdString& key, const CStdString& value)
@@ -230,8 +234,6 @@ bool CGUIDialogPlexPluginSettings::OnMessage(CGUIMessage& message)
       }
       else if (iControl == ID_BUTTON_DEFAULT)
         SetDefaults();
-      else
-        bCloseDialog = ShowVirtualKeyboard(iControl);
       
       if (iControl == ID_BUTTON_OK || iControl == ID_BUTTON_CANCEL || bCloseDialog)
       {
@@ -440,15 +442,14 @@ void CGUIDialogPlexPluginSettings::CreateControls()
     {
       if (strcmpi(type, "text") == 0 || strcmpi(type, "integer") == 0)
       {
-        pControl = new CGUIButtonControl(*pOriginalButton);
+        pControl = new CGUIEditControl(*pOriginalButton);
         if (!pControl) return;
-        //((CGUIButtonControl *)pControl)->SettingsCategorySetTextAlign(XBFONT_CENTER_Y); FIXME
-        ((CGUIButtonControl *)pControl)->SetLabel(label);
+        ((CGUIEditControl *)pControl)->SetLabel(label);
         if (id)
-          ((CGUIButtonControl *)pControl)->SetLabel2(m_settings->Get(id));
+          ((CGUIEditControl *)pControl)->SetLabel2(m_settings->Get(id));
         
         if (option && strcmpi(option, "hidden") == 0)
-          ((CGUIButtonControl *)pControl)->SetHidden(true);
+          ((CGUIEditControl*)pControl)->SetInputType(CGUIEditControl::INPUT_TYPE_PASSWORD, 0);
       }
       else if (strcmpi(type, "bool") == 0)
       {

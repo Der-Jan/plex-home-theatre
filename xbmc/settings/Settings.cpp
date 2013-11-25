@@ -811,7 +811,11 @@ bool CSettings::LoadSettings(const CStdString& strSettingsFile)
   // setup any logging...
   if (g_guiSettings.GetBool("debug.showloginfo"))
   {
+#ifndef __PLEX__
     g_advancedSettings.m_logLevel = std::max(g_advancedSettings.m_logLevelHint, LOG_LEVEL_DEBUG_FREEMEM);
+#else
+    g_advancedSettings.m_logLevel = std::max(g_advancedSettings.m_logLevelHint, LOG_LEVEL_DEBUG);
+#endif
     CLog::Log(LOGNOTICE, "Enabled debug logging due to GUI setting (%d)", g_advancedSettings.m_logLevel);
   }
   else
@@ -1677,6 +1681,7 @@ void CSettings::CycleWatchMode(const CStdString& content)
 
 void CSettings::LoadUserFolderLayout()
 {
+#ifndef __PLEX__
   // check them all
   CStdString strDir = g_guiSettings.GetString("system.playlistspath");
   if (strDir == "set default")
@@ -1688,6 +1693,7 @@ void CSettings::LoadUserFolderLayout()
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"music"));
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"video"));
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"mixed"));
+#endif
 }
 
 CStdString CSettings::GetProfileUserDataFolder() const

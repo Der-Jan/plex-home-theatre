@@ -364,6 +364,9 @@ void CAdvancedSettings::Initialize()
 
   /* Let's default to a higher quality of pics */
   m_imageRes = 1080;
+
+  m_bForceJpegImageFormat = false;
+
   /* END PLEX */
 
 
@@ -770,12 +773,25 @@ void CAdvancedSettings::ParseSettingsFile(const CStdString &file)
     // as altering it will do nothing - we don't write to advancedsettings.xml
     XMLUtils::GetInt(pRootElement, "loglevel", m_logLevelHint, LOG_LEVEL_NONE, LOG_LEVEL_MAX);
     CSettingBool *setting = (CSettingBool *)g_guiSettings.GetSetting("debug.showloginfo");
+#ifndef __PLEX__
     if (setting)
     {
       const char* hide;
       if (!((hide = pElement->Attribute("hide")) && strnicmp("false", hide, 4) == 0))
         setting->SetAdvanced();
     }
+#else
+    CSettingString *label = (CSettingString *)g_guiSettings.GetSetting("advanced.labeldebug");
+    if (setting && label)
+    {
+      const char* hide;
+      if (!((hide = pElement->Attribute("hide")) && strnicmp("false", hide, 4) == 0))
+      {
+        setting->SetAdvanced();
+        label->SetAdvanced();
+      }
+    }
+#endif
     g_advancedSettings.m_logLevel = std::max(g_advancedSettings.m_logLevel, g_advancedSettings.m_logLevelHint);
     CLog::SetLogLevel(g_advancedSettings.m_logLevel);
   }
@@ -1094,6 +1110,35 @@ void CAdvancedSettings::ParseSettingsFile(const CStdString &file)
     XMLUtils::GetBoolean(pElement, "visualizedirtyregions", m_guiVisualizeDirtyRegions);
     XMLUtils::GetInt(pElement, "algorithmdirtyregions",     m_guiAlgorithmDirtyRegions);
     XMLUtils::GetInt(pElement, "nofliptimeout",             m_guiDirtyRegionNoFlipTimeout);
+    
+    /* PLEX */
+    // If these are set manually in advancedsettings.xml, hide them from the UI since they won't be persisted.
+    TiXmlElement *pChildElement;
+    
+    pChildElement = pElement->FirstChildElement("visualizedirtyregions");
+    if (pChildElement)
+    {
+      CSettingBool *visualizeDirtyRegionsSetting = (CSettingBool *)g_guiSettings.GetSetting("debug.visualizedirtyregions");
+      if (visualizeDirtyRegionsSetting)
+        visualizeDirtyRegionsSetting->SetAdvanced();
+    }
+    
+    pChildElement = pElement->FirstChildElement("algorithmdirtyregions");
+    if (pChildElement)
+    {
+      CSettingBool *dirtyRegionsAlgorithmSetting = (CSettingBool *)g_guiSettings.GetSetting("debug.dirtyregionsalgorithm");
+      if (dirtyRegionsAlgorithmSetting)
+        dirtyRegionsAlgorithmSetting->SetAdvanced();
+    }
+    
+    pChildElement = pElement->FirstChildElement("nofliptimeout");
+    if (pChildElement)
+    {
+      CSettingBool *dirtyRegionsNoFlipTimeoutSetting = (CSettingBool *)g_guiSettings.GetSetting("debug.dirtyregionsnofliptimeout");
+      if (dirtyRegionsNoFlipTimeoutSetting)
+        dirtyRegionsNoFlipTimeoutSetting->SetAdvanced();
+    }
+    /* END PLEX */
   }
 
   /* PLEX */
@@ -1115,6 +1160,7 @@ void CAdvancedSettings::ParseSettingsFile(const CStdString &file)
   XMLUtils::GetUInt(pRootElement, "cachereadrate", m_cacheReadRate);
   XMLUtils::GetBoolean(pRootElement, "alwaysreinitcoreaudio", m_bAlwaysReinitCoreAudio);
   XMLUtils::GetBoolean(pRootElement, "hidefanouts", m_bHideFanouts);
+  XMLUtils::GetBoolean(pRootElement, "forcejpegimageformat", m_bForceJpegImageFormat);
   /* END PLEX */
 
   // load in the GUISettings overrides:
@@ -1275,7 +1321,11 @@ void CAdvancedSettings::SetDebugMode(bool debug)
 {
   if (debug)
   {
+#ifndef __PLEX__
     int level = std::max(m_logLevelHint, LOG_LEVEL_DEBUG_FREEMEM);
+#else
+    int level = std::max(m_logLevelHint, LOG_LEVEL_DEBUG);
+#endif
     m_logLevel = level;
     CLog::SetLogLevel(level);
     CLog::Log(LOGNOTICE, "Enabled debug logging due to GUI setting. Level %d.", level);
@@ -1288,3 +1338,22 @@ void CAdvancedSettings::SetDebugMode(bool debug)
     CLog::SetLogLevel(level);
   }
 }
+/* PLEX */
+void CAdvancedSettings::SetVisualizeDirtyRegions(bool visualize)
+{
+  m_guiVisualizeDirtyRegions  = visualize;
+  CLog::Log(LOGNOTICE, "Setting dirty regions vizualization to %s.", (visualize)?"true":"false");
+}
+
+void CAdvancedSettings::SetDirtyRegionsAlgorithm(int algorithm)
+{
+  m_guiAlgorithmDirtyRegions = algorithm;
+  CLog::Log(LOGNOTICE, "Setting dirty regions algorithm to %d.", algorithm);
+}
+
+void CAdvancedSettings::SetDirtyRegionsNoFlipTimeout(int timeout)
+{
+  m_guiDirtyRegionNoFlipTimeout = timeout;
+  CLog::Log(LOGNOTICE, "Setting dirty regions no flip timeout to %d.", timeout);
+}
+/* END PLEX */

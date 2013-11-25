@@ -961,7 +961,13 @@
 					<description>Objects</description>
 					<include>MediaCountLabel</include>
 					<label>$LOCALIZE[127]:</label>
-					<visible>![Container.Content(tvshows) | Container.Content(seasons) | Container.Content(episodes) | Container.Content(movies) | Container.Content(files) | Container.Content(songs) | Container.Content(artists) | Container.Content(albums) | Container.Content(musicvideos) | Container.Content(items) | Container.Content(photos)]</visible>
+					<visible>![Container.Content(tvshows) | Container.Content(seasons) | Container.Content(episodes) | Container.Content(movies) | Container.Content(files) | Container.Content(songs) | Container.Content(artists) | Container.Content(albums) | Container.Content(musicvideos) | Container.Content(items) | Container.Content(photos) | Window.IsActive(channels)]</visible>
+				</control>
+				<control type="label">
+					<description>Channels</description>
+					<include>MediaCountLabel</include>
+					<label>$LOCALIZE[31970]:</label>
+					<visible>Window.IsActive(channels)</visible>
 				</control>
 				<control type="label">
 					<description>TV Shows</description>
@@ -3547,7 +3553,7 @@
 		<!-- generic -->
 		<control type="group">
 			<posy>0</posy>
-			<visible>[!Skin.HasSetting(HideNowPlayingMusicInfo) | Window.IsActive(PlayerControls)] + ![Window.IsActive(NowPlaying) | Window.IsActive(0)]</visible>
+			<visible>[!Skin.HasSetting(HideNowPlayingMusicInfo) | Window.IsActive(PlayerControls)] + ![Window.IsActive(NowPlaying) | Window.IsActive(0)] + !Control.IsVisible(51)</visible>
 			<include>MusicNowPlayingSlideLeft</include>
 			<include>MusicNowPlayingHomeSlideAnim</include>
 			<control type="image">

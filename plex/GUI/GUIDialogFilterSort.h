@@ -10,31 +10,33 @@
 #define GUIDIALOGFILTERSORT_H
 
 #define FILTER_SUBLIST 19020
-#define FILTER_SUBLIST_BUTTON 19021
+#define FILTER_SUBLIST_RADIO_BUTTON 19021
+#define FILTER_SUBLIST_BUTTON 19022
 #define FILTER_SUBLIST_LABEL 19029
 #define FILTER_SUBLIST_BUTTONS_START -300
+#define FILTER_SUBLIST_CLEAR_FILTERS -99
 
 #include "guilib/GUIDialog.h"
-#include "Utility/PlexFilter.h"
 #include "FileItem.h"
-#include "Utility/PlexFilterHelper.h"
 #include <map>
+#include "Filters/PlexSecondaryFilter.h"
+#include "guilib/GUIRadioButtonControl.h"
+
+typedef std::pair<PlexStringPair, CGUIRadioButtonControl*> filterControl;
 
 class CGUIDialogFilterSort : public CGUIDialog
 {
   public:
     CGUIDialogFilterSort();
-
-    void SetFilter(CPlexFilterPtr filter);
-    void SetFilterHelper(CPlexFilterHelper* helper) { m_helper = helper; }
-    void DoModal(int iWindowID = WINDOW_INVALID, const CStdString &param = "");
+    void SetFilter(CPlexSecondaryFilterPtr filter, int filterButtonId);
     bool OnMessage(CGUIMessage &message);
+    bool OnAction(const CAction &action);
 
   private:
-    CPlexFilterPtr m_filter;
-    std::map<int, CGUIRadioButtonControl*> m_filterIdMap;
-    std::map<int, CFileItemPtr> m_itemIdMap;
-    CPlexFilterHelper* m_helper;
+    CGUIButtonControl *m_clearFilters;
+    CPlexSecondaryFilterPtr m_filter;
+    std::map<int, filterControl> m_filterMap;
+    int m_filterButtonId;
 };
 
 #endif // GUIDIALOGFILTERSORT_H

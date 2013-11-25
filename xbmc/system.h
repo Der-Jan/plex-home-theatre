@@ -108,7 +108,9 @@
 
 #if defined(TARGET_WINDOWS)
 #define HAS_SDL_JOYSTICK
+#ifndef __PLEX__
 #define HAS_DVD_DRIVE
+#endif
 #define HAS_WIN32_NETWORK
 #define HAS_IRSERVERSUITE
 #define HAS_AUDIO
@@ -140,6 +142,10 @@
 #define HAS_MYSQL
 #endif
 #define HAS_UPNP
+
+/* PLEX */
+#define ENABLE_AUTOUPDATE
+/* END PLEX */
 
 #define DECLARE_UNUSED(a,b) a b;
 #endif

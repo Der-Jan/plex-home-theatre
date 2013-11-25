@@ -289,6 +289,11 @@ namespace INFO
 #define VIDEOPLAYER_PARENTAL_RATING   307
 #define VIDEOPLAYER_HAS_EPG           308
 
+/* PLEX */
+#define VIDEOPLAYER_AUDIOSTREAM       311
+#define VIDEOPLAYER_SUBTITLESTREAM    312
+/* END PLEX */
+
 #define AUDIOSCROBBLER_ENABLED      325
 #define AUDIOSCROBBLER_CONN_STATE   326
 #define AUDIOSCROBBLER_SUBMIT_INT   327
@@ -322,6 +327,9 @@ namespace INFO
 #define CONTAINER_CONTENT           362
 #define CONTAINER_HAS_THUMB         363
 #define CONTAINER_SORT_METHOD       364
+/* PLEX */
+#define CONTAINER_THUMB               365
+/* END PLEX */
 
 #define CONTAINER_HAS_FOCUS         367
 #define CONTAINER_ROW               368
@@ -508,7 +516,7 @@ namespace INFO
 #define CONTROL_HAS_FOCUS           30000
 
 #define VERSION_MAJOR 12
-#define VERSION_MINOR 1
+#define VERSION_MINOR 2
 #define VERSION_TAG ""
 
 #define LISTITEM_START              35000

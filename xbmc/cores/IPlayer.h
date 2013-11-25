@@ -230,11 +230,14 @@ public:
   virtual void GetSubtitleCapabilities(std::vector<int> &subCaps) { subCaps.assign(1,IPC_SUBS_ALL); };
 
   /* PLEX */
+  virtual void SetSubtitleStreamPlexID(int plexID) {};
+  virtual void SetAudioStreamPlexID(int plexID) {};
   virtual int GetSubtitlePlexID() { return -1; };
   virtual int GetAudioStreamPlexID() { return -1; };
   virtual int GetPlexMediaPartID() { return -1; };
   virtual bool CanOpenAsync() { return false; };
   virtual void Abort() {};
+  virtual void FadeOut(int milliseconds) {};
   /* END PLEX */
 
 protected:
