@@ -36,6 +36,8 @@
 
 #define CLASSNAME "COMXVideo"
 
+typedef void (*ResolutionUpdateCallBackFn)(void *ctx, uint32_t width, uint32_t height);
+
 class COMXVideo
 {
 public:
@@ -45,6 +47,7 @@ public:
   // Required overrides
   bool SendDecoderConfig();
   bool Open(CDVDStreamInfo &hints, OMXClock *clock, bool deinterlace = false, bool hdmi_clock_sync = false);
+  void RegisterResolutionUpdateCallBack(void *ctx, ResolutionUpdateCallBackFn callback) { m_res_ctx = ctx; m_res_callback = callback; }
   void Close(void);
   unsigned int GetFreeSpace();
   unsigned int GetSize();
@@ -95,7 +98,6 @@ protected:
   uint32_t          m_history_valid_pts;
 
   bool              m_submitted_eos;
-
   bool NaluFormatStartCodes(enum CodecID codec, uint8_t *in_extradata, int in_extrasize);
 };
 

@@ -127,6 +127,10 @@ endif(ENABLE_PYTHON)
 
 # find all image files in the skin
 
+if(TARGET_RPI)
+    set(EXCLUDE_TEXTURES ^foo)
+else()  
+  
   file(GLOB MEDIA_IMAGES_MEDIASTREAM ${root}/addons/skin.mediastream/Media/*.png ${root}/addons/skin.mediastream/Media/*.gif)
   file(GLOB MEDIA_IMAGES_PLEX_SKIN ${root}/addons/skin.plex/Media/*.png ${root}/addons/skin.plex/Media/*.gif)
   
@@ -171,6 +175,7 @@ endif(ENABLE_PYTHON)
   else()
     set(EXCLUDE_TEXTURES ^foo)
   endif()
+endif()
 
 # Set some variables we need to configure the CMakeCompleteBundle file
 set(PLEXDIR ${plexdir})
@@ -224,7 +229,7 @@ install(DIRECTORY ${root}/addons DESTINATION ${RESOURCEPATH} COMPONENT RUNTIME
 
 if(ENABLE_PYTHON)
 
-    if (TARGET_LINUX)
+    if (TARGET_RPI or TARGET_ION)
         install(DIRECTORY ${RPI_EXTERNAL_PYTHON_HOME}/lib/python2.7
             DESTINATION ${LIBPATH}/lib/ COMPONENT RUNTIME 
             PATTERN python2.7/test EXCLUDE
@@ -280,5 +285,3 @@ if(CREATE_BUNDLE)
     install(SCRIPT ${CMAKE_BINARY_DIR}/plex/CMakeCompleteBundle.cmake COMPONENT RUNTIME)
   endif()
 endif()
-
-
