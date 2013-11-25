@@ -8,7 +8,7 @@ if(UNIX)
   set(CMAKE_REQUIRED_FLAGS "-D__LINUX_USER__")
 endif()
 
-option(USE_INTERNAL_FFMPEG "" ON)
+option(USE_INTERNAL_FFMPEG "" OFF)
 
 set(LINK_PKG
   Freetype
