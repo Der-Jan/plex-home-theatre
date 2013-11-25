@@ -35,7 +35,6 @@ set(LINK_PKG
   Xrandr
   LibDl
   LibRt
-  FLAC
   DBUS
 )
 
