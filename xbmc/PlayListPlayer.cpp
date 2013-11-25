@@ -42,13 +42,6 @@ CPlayListPlayer::CPlayListPlayer(void)
   m_PlaylistMusic = new CPlayList(PLAYLIST_MUSIC);
   m_PlaylistVideo = new CPlayList(PLAYLIST_VIDEO);
   m_PlaylistEmpty = new CPlayList;
-using namespace PLAYLIST;
-
-CPlayListPlayer::CPlayListPlayer(void)
-{
-  m_PlaylistMusic = new CPlayList(PLAYLIST_MUSIC);
-  m_PlaylistVideo = new CPlayList(PLAYLIST_VIDEO);
-  m_PlaylistEmpty = new CPlayList;
   m_iCurrentSong = -1;
   m_bPlayedFirstFile = false;
   m_bPlaybackStarted = false;
