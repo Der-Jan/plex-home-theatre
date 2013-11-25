@@ -154,4 +154,4 @@ set(PLEX_LINK_WHOLEARCHIVE -Wl,--whole-archive)
 set(PLEX_LINK_NOWHOLEARCHIVE -Wl,--no-whole-archive)
 
 ############ Add our definitions
-add_definitions(-DTARGET_LINUX -D_LINUX)
+add_definitions(-DTARGET_LINUX -D_LINUX -DTARGET_ION)
