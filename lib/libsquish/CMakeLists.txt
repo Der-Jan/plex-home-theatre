@@ -3,7 +3,6 @@
   find_all_sources(. squish_SRCS)
   
 if (NOT TARGET_RPI)
-
   if(CMAKE_SSE_CFLAGS)
     add_definitions(-DSQUISH_USE_SSE=2)
     

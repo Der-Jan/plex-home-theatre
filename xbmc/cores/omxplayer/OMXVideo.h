@@ -96,7 +96,8 @@ protected:
   bool              m_hdmi_clock_sync;
   bool              m_first_frame;
   uint32_t          m_history_valid_pts;
-
+  ResolutionUpdateCallBackFn m_res_callback;
+  void              *m_res_ctx;
   bool              m_submitted_eos;
   bool NaluFormatStartCodes(enum CodecID codec, uint8_t *in_extradata, int in_extrasize);
 };

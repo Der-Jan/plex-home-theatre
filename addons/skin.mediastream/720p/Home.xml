@@ -232,8 +232,8 @@
 							<include>HomeSideMenuFOBGImage</include>
 							<animation effect="slide" start="0,245" end="0,0" time="500" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnNext + Container(506).Position(0)">focus</animation>
 							<animation effect="slide" start="0,-43" end="0,0" time="400" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnNext + !Container(506).Position(0)">focus</animation>
-							<animation effect="slide" start="0,-245" end="0,0" time="500" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnPrevious + Container(506).Position(8)">focus</animation>
-							<animation effect="slide" start="0,43" end="0,0" time="400" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnPrevious + !Container(506).Position(8)">focus</animation>
+							<animation effect="slide" start="0,-245" end="0,0" time="500" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnPrevious + Container(506).Position(7)">focus</animation>
+							<animation effect="slide" start="0,43" end="0,0" time="400" reversible="false" tween="quadratic" easing="out" condition="Container(506).OnPrevious + !Container(506).Position(7)">focus</animation>
 						</control>
 						<control type="label">
 							<include>HomeSideMenuFOBGLabel</include>
@@ -276,16 +276,6 @@
 							<description>About Button</description>
 							<label> $LOCALIZE[31800] </label>
 							<onclick>XBMC.ActivateWindow(4)</onclick>
-						</item>
-						<item id="101">
-							<description>RasPlex Settings Button</description>
-								<label> $LOCALIZE[41000] </label>
-								<onclick>RunAddon(service.openelec.settings)</onclick>
-						</item>
-                        <item id="102">
-							<description>Update Button</description>
-							<label> $LOCALIZE[41001] </label>
-							<onclick>RunAddon(script.rasplex.update)</onclick>
 						</item>
 					</content>
 				</control>
@@ -633,8 +623,8 @@
 				<posy>235</posy>
 				<posx>1</posx>
 				<visible>[!Control.IsVisible(11000) + Control.IsVisible(11001)] | [!Control.IsVisible(11001) + Control.IsVisible(11000)] | [Control.IsVisible(11003) + !Control.IsVisible(11004)] | [!Control.IsVisible(11003) + Control.IsVisible(11004)] | Control.IsVisible(11002)</visible>
-				<animation effect="fade" start="0" end="100" time="500" delay="0">Visible</animation>
-				<animation effect="fade" start="100" end="0" time="100" delay="0">Hidden</animation>
+				<!--<animation effect="fade" start="0" end="100" time="500" delay="0">Visible</animation>
+				<animation effect="fade" start="100" end="0" time="100" delay="0">Hidden</animation>-->
 				<control type="image">
 					<texture background="true">newlistsinglebgunfocused1.png</texture>
 				</control>
@@ -711,10 +701,9 @@
 						<onup>-</onup>
 						<onright>-</onright>
 						<onleft>300</onleft>
-						<preloaditems>4</preloaditems>
 						<posx>-14</posx>
 						<posy>131</posy>
-						<width>870</width>
+						<width>880</width>
 						<height>350</height>
 						<itemlayout width="140" height="330">
 							<!-- album -->
@@ -919,7 +908,7 @@
 									<width>116</width>
 									<height>176</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 								</control>
 								<!-- dimming mask when list not selected -->
 								<control type="image">
@@ -963,7 +952,7 @@
 									<width>116</width>
 									<height>176</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 								</control>
 							</control>
 						</itemlayout>
@@ -1165,7 +1154,7 @@
 									<width>122</width>
 									<height>182</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -1189,7 +1178,7 @@
 									<width>122</width>
 									<height>182</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -1426,7 +1415,7 @@
 						<height>30</height>
 						<posy>347</posy>
 						<align>right</align>
-						<label>$LOCALIZE[31045]</label>
+						<label>Recently Added</label>
 						<visible>Control.IsVisible(11000) + Control.IsVisible(11001)</visible>
 					</control>
 					<visible allowhiddenfocus="false">true</visible>
@@ -1440,7 +1429,7 @@
 						<height>30</height>
 						<posy>249</posy>
 						<align>right</align>
-						<label>$LOCALIZE[31045]</label>
+						<label>Recently Added</label>
 						<visible>Control.IsVisible(11000) + !Control.IsVisible(11001)</visible>
 					</control>
 					<!-- select arrow if only this list is visible -->
@@ -1468,7 +1457,6 @@
 						<onup>7002</onup>
 						<onright>-</onright>
 						<onleft>300</onleft>
-						<preloaditems>4</preloaditems>
 						<posx>-14</posx>
 						<posy>0</posy>
 						<width>880</width>
@@ -1794,7 +1782,7 @@
 									<width>116</width>
 									<height>176</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 								</control>
 								<!-- dimming mask when list not selected -->
 								<control type="image">
@@ -1829,7 +1817,7 @@
 									<width>116</width>
 									<height>176</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 								</control>
 							</control>
 						</itemlayout>
@@ -1852,7 +1840,7 @@
 									<width>122</width>
 									<height>122</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -1911,7 +1899,7 @@
 									<width>122</width>
 									<height>122</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -2139,7 +2127,7 @@
 									<width>122</width>
 									<height>182</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -2154,7 +2142,7 @@
 									<width>122</width>
 									<height>182</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>
@@ -2446,7 +2434,6 @@
 						<onup>-</onup>
 						<onright>-</onright>
 						<onleft>300</onleft>
-						<preloaditems>4</preloaditems>
 						<posx>-14</posx>
 						<posy>131</posy>
 						<width>880</width>
@@ -2942,7 +2929,6 @@
 						<onup>7003</onup>
 						<onright>-</onright>
 						<onleft>300</onleft>
-						<preloaditems>4</preloaditems>
 						<posx>-14</posx>
 						<posy>0</posy>
 						<width>880</width>
@@ -3508,7 +3494,6 @@
 						<onup>-</onup>
 						<onright>-</onright>
 						<onleft>300</onleft>
-						<preloaditems>4</preloaditems>
 						<posx>-14</posx>
 						<posy>250</posy>
 						<width>880</width>
@@ -3541,7 +3526,7 @@
 									<width>116</width>
 									<height>116</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 								</control>
 								<control type="label">
 									<posx>95</posx>
@@ -3568,7 +3553,7 @@
 									<width>122</width>
 									<height>122</height>
 									<aspectratio scalediffuse="false" align="center">scale</aspectratio>
-									<texture diffuse="posterMaskSmall.png" background="true">$INFO[ListItem.Art(thumb)]</texture>
+									<texture diffuse="posterMaskSmall.png" background="true" fallback="posterFrameSmallShadow2.png">$INFO[ListItem.Art(thumb)]</texture>
 									<bordertexture border="10">frameOrange.png</bordertexture>
 									<bordersize>3</bordersize>
 								</control>

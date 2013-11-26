@@ -110,7 +110,6 @@ public:
    \param immediately set to true to cleanup images regardless of whether the delay has passed
    */
   void CleanupUnusedImages(bool immediately = false);
-  void QueueImage(const CStdString &path);
 
 private:
   class CLargeTexture
@@ -136,7 +135,7 @@ private:
     unsigned int m_timeToDelete;
   };
 
-
+  void QueueImage(const CStdString &path);
 
   std::vector< std::pair<unsigned int, CLargeTexture *> > m_queued;
   std::vector<CLargeTexture *> m_allocated;

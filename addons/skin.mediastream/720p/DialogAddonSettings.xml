@@ -204,7 +204,5 @@
 			<textoffsety>8</textoffsety>
 			<include>DialogTextControl</include>
 		</control>
-	
-
 	</controls>
 </window>
