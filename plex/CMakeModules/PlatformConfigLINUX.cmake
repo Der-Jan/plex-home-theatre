@@ -8,7 +8,7 @@ if(UNIX)
   set(CMAKE_REQUIRED_FLAGS "-D__LINUX_USER__")
 endif()
 
-option(USE_INTERNAL_FFMPEG "" OFF)
+option(USE_INTERNAL_FFMPEG "" ON)
 
 set(LINK_PKG
   Freetype
@@ -67,6 +67,7 @@ set(INSTALL_LIB
   RTMP
   PLIST
   ShairPort
+  CEC
   VAAPI
   VDPAU
 )
@@ -74,8 +75,6 @@ set(INSTALL_LIB
 foreach(l ${INSTALL_LIB})
   plex_find_package(${l} 1 0)
 endforeach()
-
-plex_find_package(CEC 0 0)
 
 plex_find_package(Threads 1 0)
 if(CMAKE_USE_PTHREADS_INIT)
@@ -154,3 +153,4 @@ set(PLEX_LINK_NOWHOLEARCHIVE -Wl,--no-whole-archive)
 
 ############ Add our definitions
 add_definitions(-DTARGET_LINUX -D_LINUX -DTARGET_ION)
+message(STATUS "CONFIG_PLEX_LINK_LIBRARIES=${CONFIG_PLEX_LINK_LIBRARIES}")
