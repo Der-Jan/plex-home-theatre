@@ -8,18 +8,7 @@ endif()
 
 
 
-set(CONFIG_FLAGS --target-os=${OS} --disable-muxers --disable-encoders --disable-devices --disable-doc --disable-ffplay --disable-ffmpeg --disable-ffprobe --disable-ffserver --disable-vda --disable-crystalhd --disable-decoder=mpeg_xvmc --disable-debug --disable-amd3dnow --disable-libvorbis --enable-gpl --enable-postproc --enable-shared --disable-static --enable-pthreads --enable-muxer=spdif --enable-muxer=adts --enable-encoder=ac3 --enable-encoder=aac --enable-protocol=http --enable-runtime-cpudetect)
-
-
-if(TARGET_RPI)
-
-  list(APPEND CONFIG_FLAGS --enable-hardcoded-tables --enable-pic
-  --cpu=arm1176jzf-s --arch=arm --enable-cross-compile
-  --cross-prefix=${TARGET_PREFIX} --sysroot=${SYSROOT_PREFIX}
-  --sysinclude="${SYSROOT_PREFIX}/usr/include" )
-
-endif()
-
+set(CONFIG_FLAGS --target-os=${OS} --disable-muxers --disable-encoders --disable-devices --disable-doc --disable-ffplay --disable-ffmpeg --disable-ffprobe --disable-ffserver --disable-vda --disable-crystalhd --disable-decoder=mpeg_xvmc --disable-debug --disable-amd3dnow --disable-libvorbis --enable-gpl --enable-postproc --enable-shared --disable-static --enable-pthreads --enable-muxer=spdif --enable-muxer=adts --enable-encoder=ac3 --enable-encoder=aac --enable-protocol=http --enable-runtime-cpudetect --enable-vdpau --enable-vaapi)
 
 
 if(TARGET_RPI OR TARGET_ION)
