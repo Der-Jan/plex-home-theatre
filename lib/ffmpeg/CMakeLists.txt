@@ -6,6 +6,8 @@ elseif(TARGET_DARWIN)
   set(OS darwin)
 endif()
 
+
+
 set(CONFIG_FLAGS --target-os=${OS} --disable-muxers --disable-encoders --disable-devices --disable-doc --disable-ffplay --disable-ffmpeg --disable-ffprobe --disable-ffserver --disable-vda --disable-crystalhd --disable-decoder=mpeg_xvmc --disable-debug --disable-amd3dnow --disable-libvorbis --enable-gpl --enable-postproc --enable-shared --disable-static --enable-pthreads --enable-muxer=spdif --enable-muxer=adts --enable-encoder=ac3 --enable-encoder=aac --enable-protocol=http --enable-runtime-cpudetect)
 
 
@@ -18,26 +20,10 @@ if(TARGET_RPI)
 
 endif()
 
-#--target-os="linux"
-#--nm="$NM"
-#--ar="$AR"
-#--as="$CC"
-#--cc="$CC"
-#--ld="$CC"
-#--host-cc="$HOST_CC"
-#--host-cflags="$HOST_CFLAGS"
-#--host-ldflags="$HOST_LDFLAGS"
-#--host-libs="-lm"
-#--extra-cflags="$CFLAGS"
-#--extra-ldflags="$LDFLAGS"
-#--extra-libs=""
-
-
-
 
 ExternalProject_Add(
   ffmpeg
-  SOURCE_DIR .
+  URL .
   PREFIX ffmpeg
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> ${CONFIG_FLAGS}
   BUILD_COMMAND make -j 4
