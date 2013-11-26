@@ -78,11 +78,9 @@ class CPlexSectionFanout : public IJobCallback
     void GetContentList(int type, CFileItemList& list);
     void Refresh();
     void Show();
-    void CancelJobs();
 
     bool NeedsRefresh();
     static CStdString GetBestServerUrl(const CStdString& extraUrl="");
-    CStdString GetContent(const CStdString& url);
   
     SectionTypes m_sectionType;
     bool m_needsRefresh;
@@ -97,9 +95,6 @@ class CPlexSectionFanout : public IJobCallback
     CPlexTimer m_age;
     CCriticalSection m_critical;
     std::vector<int> m_outstandingJobs;
-
-    std::map<CStdString, CStdString> m_UrlCache;
-    CCurlFile  m_http;
 };
 
 class CGUIWindowHome : public CGUIWindow, public PlexContentPlayerMixin, public IPlexGlobalTimeout, public IJobCallback
