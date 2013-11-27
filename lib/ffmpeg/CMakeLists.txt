@@ -42,7 +42,7 @@ message(STATUS "Current binary dir:${CMAKE_CURRENT_BINARY_DIR}")
 message(STATUS "Binpath: ${BINPATH}")
 
 
-if(TARGET_RPI)
+if(TARGET_RPI OR TARGET_ION)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavcodec.so.53.61.100 DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/system/players/dvdplayer RENAME avcodec-53-${ARCH}.so COMPONENT RUNTIME )
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavformat.so.53.32.100 DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/system/players/dvdplayer RENAME avformat-53-${ARCH}.so COMPONENT RUNTIME )
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ffmpeg/lib/libavutil.so.51.35.100 DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/system/players/dvdplayer RENAME avutil-51-${ARCH}.so COMPONENT RUNTIME )
