@@ -114,7 +114,7 @@ void CPlexSectionFanout::GetContentList(int type, CFileItemList& list)
 {
   CSingleLock lk(m_critical);
   if (m_fileLists.find(type) != m_fileLists.end())
-    list.Assign(*m_fileLists[type], false);
+    list.Copy(*m_fileLists[type], true);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -191,7 +191,7 @@ void CPlexSectionFanout::Refresh()
       /* On slow/limited systems we don't want to have the full list */
 #if defined(TARGET_RPI) || defined(TARGET_DARWIN_IOS)
       trueUrl.SetOption("X-Plex-Container-Start", "0");
-      trueUrl.SetOption("X-Plex-Container-Size", "10");
+      trueUrl.SetOption("X-Plex-Container-Size", "20");
 #endif
       
       if (m_sectionType != SECTION_TYPE_ALBUM)
