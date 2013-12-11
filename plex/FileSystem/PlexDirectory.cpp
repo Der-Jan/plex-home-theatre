@@ -234,6 +234,8 @@ CPlexDirectory::GetDirectory(const CURL& url, CFileItemList& fileItems)
       CLog::Log(LOGERROR, "CPlexDirectory::GetDirectory failed to read root MediaContainer from %s", m_url.Get().c_str());
       return false;
     }
+  
+
 
 	// Adding to Cache
 	if (bCachable)
