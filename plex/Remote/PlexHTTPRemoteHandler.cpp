@@ -120,7 +120,7 @@ int CPlexHTTPRemoteHandler::HandleHTTPRequest(const HTTPRequest &request)
     sendString(argumentMap);
 
 
-#ifdef LEGACY
+#if defined(LEGACY) or defined(TARGET_RASPBERRY_PI)
   else if (path.Equals("/player/application/sendString"))
     sendString(argumentMap);
   else if (path.Equals("/player/application/sendVirtualKey") ||
@@ -156,6 +156,7 @@ size_t CPlexHTTPRemoteHandler::GetHTTPResonseDataLength() const
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexHTTPRemoteHandler::updateCommandID(const HTTPRequest &request, const ArgMap &arguments)
 {
+  CLog::Log(LOGINFO, "CPlexHTTPRemoteHandler::updateCommandID no commandID sent to this request!");
   if (arguments.find("commandID") == arguments.end())
   {
     CLog::Log(LOGWARNING, "CPlexHTTPRemoteHandler::updateCommandID no commandID sent to this request!");
