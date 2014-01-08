@@ -2486,7 +2486,11 @@ void CApplication::Render()
   bool decrement = false;
   bool hasRendered = false;
   bool limitFrames = false;
+  #if defined(TARGET_RASPBERRY_PI)
+  unsigned int singleFrameTime = 66; // default limit 15 fps
+  #else
   unsigned int singleFrameTime = 10; // default limit 100 fps
+  #endif
 
   {
     // Less fps in DPMS
@@ -4660,12 +4664,6 @@ void CApplication::OnPlayBackPaused()
   param["player"]["speed"] = 0;
   param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
   CAnnouncementManager::Announce(Player, "xbmc", "OnPause", m_itemCurrentFile, param);
-
-  /* PLEX */
-  CGUIDialogVideoOSD *osd = (CGUIDialogVideoOSD*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_OSD);
-  if (IsPlayingVideo() && osd && !osd->IsActive())
-    CApplicationMessenger::Get().DoModal(osd, WINDOW_DIALOG_VIDEO_OSD, "pauseOpen", false);
-  /* END PLEX */
 }
 
 void CApplication::OnPlayBackResumed()
@@ -4678,12 +4676,6 @@ void CApplication::OnPlayBackResumed()
   param["player"]["speed"] = 1;
   param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
   CAnnouncementManager::Announce(Player, "xbmc", "OnPlay", m_itemCurrentFile, param);
-
-  /* PLEX */
-  CGUIDialogVideoOSD *osd = (CGUIDialogVideoOSD*)g_windowManager.GetWindow(WINDOW_DIALOG_VIDEO_OSD);
-  if (IsPlayingVideo() && osd && osd->IsOpenedFromPause())
-    CApplicationMessenger::Get().Close(osd, false);
-  /* PLEX */
 }
 
 void CApplication::OnPlayBackSpeedChanged(int iSpeed)
