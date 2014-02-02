@@ -34,11 +34,11 @@
 #ifdef TARGET_WINDOWS
 #include "cores/VideoRenderers/WinRenderer.h"
 #else
-#ifdef TARGET_RPI
+#ifdef TARGET_RASPBERRY_PI
 #include "cores/VideoRenderers/LinuxRendererGLES.h"
 #else
 #include "cores/VideoRenderers/LinuxRendererGL.h"
-#endif
+#endif //raspberry pi
 #endif
 /* END PLEX */
 

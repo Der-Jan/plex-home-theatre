@@ -1803,8 +1803,8 @@ bool CApplication::StartAirplayServer()
       {
         txt.push_back(std::make_pair("deviceid", "FF:FF:FF:FF:FF:F2"));
       }
-      txt.push_back(std::make_pair("features", "0x77"));
-      txt.push_back(std::make_pair("model", "Xbmc,1"));
+      txt.push_back(std::make_pair("features", "0x1000009FF"));
+      txt.push_back(std::make_pair("model", "AppleTV3,1"));
       txt.push_back(std::make_pair("srcvers", AIRPLAY_SERVER_VERSION_STR));
       CZeroconf::GetInstance()->PublishService("servers.airplay", "_airplay._tcp", g_infoManager.GetLabel(SYSTEM_FRIENDLY_NAME), listenPort, txt);
       ret = true;
@@ -5396,9 +5396,11 @@ bool CApplication::OnMessage(CGUIMessage& message)
         if (CLastFmManager::GetInstance()->IsRadioEnabled())
           CLastFmManager::GetInstance()->StopRadio();
 
-        delete m_pPlayer;
-        m_pPlayer = 0;
-
+        if (!m_pPlayer->IsPlaying())
+        {
+          delete m_pPlayer;
+          m_pPlayer = 0;
+        }
         // Reset playspeed
         m_iPlaySpeed = 1;
       }

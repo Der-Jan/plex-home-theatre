@@ -17,6 +17,7 @@
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
 
+#include <limits.h>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexNavigationHelper::CacheUrl(const std::string& url, bool& cancel, bool closeDialog)
@@ -24,7 +25,11 @@ bool CPlexNavigationHelper::CacheUrl(const std::string& url, bool& cancel, bool 
 
   int id = CJobManager::GetInstance().AddJob(new CPlexDirectoryFetchJob(CURL(url)), this, CJob::PRIORITY_HIGH);
 
+  #ifdef TARGET_RASPBERRY_PI
+  if (!m_cacheEvent.WaitMSec(UINT_MAX)) // obvious sentinal value
+  #else
   if (!m_cacheEvent.WaitMSec(300))
+  #endif
   {
     CGUIDialogBusy *busy = (CGUIDialogBusy*)g_windowManager.GetWindow(WINDOW_DIALOG_BUSY);
     cancel = false;
