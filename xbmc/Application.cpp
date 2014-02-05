@@ -2454,7 +2454,11 @@ bool CApplication::WaitFrame(unsigned int timeout)
 void CApplication::NewFrame()
 {
   /* PLEX */
+#if !defined(TARGET_RASPBERRY_PI)
+  // on RPi, with OMX player, there is a race condition, causing this function to deadlock on Graphic context
+  // when player is flipping page
   HideBusyIndicator();
+#endif
   /* END PLEX */
 
   // We just posted another frame. Keep track and notify.
@@ -4456,6 +4460,22 @@ bool CApplication::PlayFile(const CFileItem& item_, bool bRestart)
 
   // tell system we are starting a file
   m_bPlaybackStarting = true;
+
+
+  int previousMsgsIgnoredByNewPlaying[] = {
+        GUI_MSG_PLAYBACK_STARTED,
+        GUI_MSG_PLAYBACK_ENDED,
+        GUI_MSG_PLAYBACK_STOPPED,
+        GUI_MSG_PLAYLIST_CHANGED,
+        GUI_MSG_PLAYLISTPLAYER_STOPPED,
+        GUI_MSG_PLAYLISTPLAYER_STARTED,
+        GUI_MSG_PLAYLISTPLAYER_CHANGED,
+        GUI_MSG_QUEUE_NEXT_ITEM,
+        0
+      };
+  int dMsgCount = g_windowManager.RemoveThreadMessageByMessageIds(&previousMsgsIgnoredByNewPlaying[0]);
+  if (dMsgCount > 0)
+    CLog::Log(LOGDEBUG,"%s : Ignored %d playback thread messages", __FUNCTION__, dMsgCount);
 
   // We should restart the player, unless the previous and next tracks are using
   // one of the players that allows gapless playback (paplayer, dvdplayer)
