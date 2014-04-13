@@ -47,6 +47,7 @@ class CPlexAttributeParserMediaUrl : public CPlexAttributeParserBase
 {
   public:
     virtual void Process(const CURL &url, const CStdString &key, const CStdString &value, CFileItem *item);
+    static CStdString GetImageURL(const CURL &url, const CStdString &source, int height, int width);
 };
 
 class CPlexAttributeParserMediaFlag : public CPlexAttributeParserMediaUrl

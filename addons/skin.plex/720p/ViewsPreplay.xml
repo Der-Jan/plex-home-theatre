@@ -110,7 +110,7 @@
 			<posy>13</posy>
 			<width>198</width>
 			<height>106</height>
-			<texture background="true" diffuse="mask-clip-small.png">$INFO[ListItem.Art(thumb)]</texture>
+			<texture background="true" diffuse="mask-clip-small.png">$INFO[ListItem.Art(smallThumb)]</texture>
 			<aspectratio scalediffuse="false" align="center" aligny="top">scale</aspectratio>
 		</control>
 	</include>
@@ -281,7 +281,7 @@
 			<posx>117</posx>
 			<width>360</width>
 			<height>540</height>
-			<texture background="true" diffuse="preplay-poster-big-mask.png">$INFO[ListItem.Art(thumb)]</texture>
+			<texture background="true" diffuse="preplay-poster-big-mask.png">$INFO[ListItem.Art(bigThumb)]</texture>
 			<!--><texture background="true" diffuse="preplay-poster-big-mask.png">$INFO[ListItem.Art(bigPoster)]</texture>-->
 			<aspectratio scalediffuse="false" align="center" aligny="top">scale</aspectratio>
 			<animation effect="fade" start="0" end="100" time="0" condition="true">Conditional</animation>
@@ -806,7 +806,7 @@
 					<control type="label">
 						<width min="29" max="450">auto</width>
 						<height>44</height>
-						<label>$INFO[ListItem.Title]</label>
+						<label>$INFO[ListItem.Label]</label>
 						<font>Bold-36</font>
 						<include>Grey1</include>
 						<visible>true</visible>
@@ -835,6 +835,8 @@
 					<include>WhiteShadow</include>
 					<visible>IsEmpty(ListItem.Season)</visible>
 				</control>
+				<!-- Unavailable indicator -->
+				<include>UnavailableIndicator</include>
 			</control>
 			<!-- Infos Right -->
 			<control type="group">
@@ -996,7 +998,7 @@
 					<control type="label">
 						<width min="29" max="500">auto</width>
 						<height>44</height>
-						<label>$INFO[ListItem.Title]</label>
+						<label>$INFO[ListItem.Label]</label>
 						<font>Bold-36</font>
 						<include>WhiteShadow</include>
 						<visible>true</visible>
@@ -1026,6 +1028,8 @@
 					<include>WhiteShadow</include>
 					<visible>true</visible>
 				</control>
+				<!-- Unavailable indicator -->
+				<include>UnavailableIndicator</include>
 			</control>
 			<!-- Infos Right -->
 			<control type="group">
@@ -1220,7 +1224,7 @@
 					<control type="label">
 						<width min="29" max="570">auto</width>
 						<height>44</height>
-						<label>$INFO[ListItem.Title]</label>
+						<label>$INFO[ListItem.Label]</label>
 						<font>Bold-36</font>
 						<include>WhiteShadow</include>
 						<visible>true</visible>

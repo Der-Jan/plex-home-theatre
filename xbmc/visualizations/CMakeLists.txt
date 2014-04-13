@@ -10,11 +10,10 @@ add_subdirectory(WaveForm)
 
 if(NOT WIN32)
 
-  if(TARG_RPI)
+  if(TARGET_RPI)
     include_directories(
      ${root}/xbmc/visualizations/EGLHelpers
     )
-
     add_subdirectory(EGLHelpers)
   else()
     add_subdirectory(XBMCProjectM)
@@ -22,7 +21,7 @@ if(NOT WIN32)
 
   add_subdirectory(OpenGLSpectrum)
   
-  if (NOT APPLE)
+  if (NOT APPLE AND NOT TARGET_RPI)
     add_subdirectory(Goom)
   endif()
 else()

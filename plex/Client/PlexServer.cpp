@@ -35,6 +35,9 @@ CPlexServerConnTestThread::Process()
   if (state == CPlexConnection::CONNECTION_STATE_REACHABLE)
     CLog::Log(LOGDEBUG, "CPlexServerConnTestJob:DoWork took %lld sec, Connection SUCCESS %s ~ localConn: %s conn: %s",
               t.elapsed(), m_server->GetName().c_str(), m_conn->IsLocal() ? "YES" : "NO", m_conn->GetAddress().Get().c_str());
+  else if (state == CPlexConnection::CONNECTION_STATE_UNKNOWN)
+    CLog::Log(LOGDEBUG, "CPlexServerConnTestJob:DoWork took %lld sec, Connection ABORTED %s ~ localConn: %s conn: %s",
+              t.elapsed(), m_server->GetName().c_str(), m_conn->IsLocal() ? "YES" : "NO", m_conn->GetAddress().Get().c_str());
   else
     CLog::Log(LOGDEBUG, "CPlexServerConnTestJob:DoWork took %lld sec, Connection FAILURE %s ~ localConn: %s conn: %s",
               t.elapsed(), m_server->GetName().c_str(), m_conn->IsLocal() ? "YES" : "NO", m_conn->GetAddress().Get().c_str());
@@ -45,6 +48,12 @@ CPlexServerConnTestThread::Process()
 void CPlexServerConnTestThread::Cancel()
 {
   m_conn->m_http.Cancel();
+}
+
+CPlexServer::CPlexServer(CPlexConnectionPtr connection)
+{
+  AddConnection(connection);
+  m_activeConnection = connection;
 }
 
 bool
@@ -116,6 +125,22 @@ CPlexServer::HasActiveLocalConnection() const
   return (m_activeConnection != NULL && m_activeConnection->IsLocal());
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CPlexConnectionPtr CPlexServer::GetLocalConnection() const
+{
+  if (HasActiveLocalConnection())
+    return m_activeConnection;
+
+  CSingleLock lk(m_serverLock);
+  BOOST_FOREACH(CPlexConnectionPtr connection, m_connections)
+  {
+    if (connection->IsLocal())
+      return connection;
+  }
+  return CPlexConnectionPtr();
+}
+
 void
 CPlexServer::MarkAsRefreshing()
 {
@@ -146,11 +171,11 @@ CPlexServer::MarkUpdateFinished(int connType)
     vector<CPlexConnectionPtr>::iterator it = find(m_connections.begin(), m_connections.end(), conn);
     m_connections.erase(it);
 
-    if (m_activeConnection == conn)
+    if (m_activeConnection && m_activeConnection->Equals(conn))
+    {
+      CLog::Log(LOGDEBUG, "CPlexServer::MarkUpdateFinished Lost activeConnection for server %s", GetName().c_str());
       m_activeConnection.reset();
-
-    if (m_bestConnection == conn)
-      m_bestConnection.reset();
+    }
   }
 
   return m_connections.size() > 0;
@@ -213,13 +238,32 @@ CPlexServer::UpdateReachability()
   return (bool)m_bestConnection;
 }
 
+void CPlexServer::CancelReachabilityTests()
+{
+  CSingleLock lk(m_connTestThreadLock);
+
+  BOOST_FOREACH(CPlexServerConnTestThread* thread, m_connTestThreads)
+    thread->Cancel();
+}
+
+CStdString CPlexServer::GetAccessToken() const
+{
+  CSingleLock lk(m_serverLock);
+  BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
+  {
+    if (!conn->GetAccessToken().empty())
+      return conn->GetAccessToken();
+  }
+  return CStdString();
+}
+
 void CPlexServer::OnConnectionTest(CPlexConnectionPtr conn, int state)
 {
   {
     CSingleLock lk(m_connTestThreadLock);
     BOOST_FOREACH(CPlexServerConnTestThread* thread, m_connTestThreads)
     {
-      if (thread->m_conn == conn)
+      if (thread->m_conn->Equals(conn))
       {
         m_connTestThreads.erase(std::remove(m_connTestThreads.begin(), m_connTestThreads.end(), thread));
         break;
@@ -257,17 +301,31 @@ CPlexServer::Merge(CPlexServerPtr otherServer)
   CSingleLock lk(m_serverLock);
 
   m_name = otherServer->m_name;
-  m_version = otherServer->m_version;
-  m_owned = otherServer->m_owned;
-  m_owner = otherServer->m_owner;
+  if (!otherServer->m_version.empty())
+    m_version = otherServer->m_version;
+
+  // Token ownership is the only ownership metric to be believed. Everything else defaults to owned.
+  // If something comes after myPlex on the LAN, say, we'll reset ownership to owned.
+  if (!otherServer->GetAccessToken().empty())
+    m_owned = otherServer->m_owned;
+
+  if (!otherServer->GetOwner().empty())
+    m_owner = otherServer->m_owner;
 
   BOOST_FOREACH(CPlexConnectionPtr conn, otherServer->m_connections)
   {
-    vector<CPlexConnectionPtr>::iterator it;
-    it = find(m_connections.begin(), m_connections.end(), conn);
-    if (it != m_connections.end())
-      (*it)->Merge(conn);
-    else
+    bool found = false;
+    BOOST_FOREACH(CPlexConnectionPtr mappedConn, m_connections)
+    {
+      if (conn->Equals(mappedConn))
+      {
+        mappedConn->Merge(conn);
+        found = true;
+        break;
+      }
+    }
+
+    if (!found)
       AddConnection(conn);
   }
 }
@@ -372,10 +430,6 @@ string CPlexServer::GetAnyToken() const
 void
 CPlexServer::AddConnection(CPlexConnectionPtr connection)
 {
-  if (m_activeConnection && m_activeConnection->IsLocal() &&
-      (!connection->GetAccessToken().empty() && !HasAuthToken()))
-    m_activeConnection.reset();
-  
   m_connections.push_back(connection);
 }
 
@@ -393,76 +447,4 @@ CPlexServer::toString() const
              m_serverClass);
 
   return ret;
-}
-
-void CPlexServer::save(TiXmlNode *parent)
-{
-  CSingleLock lk(m_serverLock);
-
-  TiXmlElement serverEl("server");
-
-  serverEl.SetAttribute("name", m_name.c_str());
-  serverEl.SetAttribute("version", m_version.c_str());
-  serverEl.SetAttribute("uuid", m_uuid.c_str());
-  serverEl.SetAttribute("owner", m_owner.c_str());
-
-  serverEl.SetAttribute("owned", m_owned);
-  serverEl.SetAttribute("serverClass", m_serverClass.c_str());
-  serverEl.SetAttribute("supportsDeletion", m_supportsDeletion);
-  serverEl.SetAttribute("supportsVideoTranscoding", m_supportsVideoTranscoding);
-  serverEl.SetAttribute("supportsAudioTranscoding", m_supportsAudioTranscoding);
-
-  serverEl.SetAttribute("transcoderQualities", StringUtils::Join(m_transcoderQualities, ",").c_str());
-  serverEl.SetAttribute("transcoderBitrates", StringUtils::Join(m_transcoderBitrates, ",").c_str());
-  serverEl.SetAttribute("transcoderResolutions", StringUtils::Join(m_transcoderResolutions, ",").c_str());
-
-  TiXmlNode *server = parent->InsertEndChild(serverEl);
-
-  BOOST_FOREACH(CPlexConnectionPtr conn, m_connections)
-    conn->save(server);
-}
-
-CPlexServerPtr CPlexServer::load(TiXmlElement *element)
-{
-  std::string name, uuid;
-  bool owned;
-
-  CPlexServerPtr fail;
-
-  if (element->QueryStringAttribute("name", &name) != TIXML_SUCCESS)
-    return fail;
-
-  if (element->QueryStringAttribute("uuid", &uuid) != TIXML_SUCCESS)
-    return fail;
-
-  if (element->QueryBoolAttribute("owned", &owned) != TIXML_SUCCESS)
-    return fail;
-
-  CPlexServerPtr server = CPlexServerPtr(new CPlexServer(uuid, name, owned));
-
-  element->QueryStringAttribute("version", &server->m_version);
-  element->QueryStringAttribute("owner", &server->m_owner);
-  element->QueryStringAttribute("serverClass", &server->m_serverClass);
-  element->QueryBoolAttribute("supportsDeletion", &server->m_supportsDeletion);
-  element->QueryBoolAttribute("supportsVideoTranscoding", &server->m_supportsDeletion);
-  element->QueryBoolAttribute("supportsAudioTranscoding", &server->m_supportsDeletion);
-
-  std::string lists;
-  if (element->QueryStringAttribute("transcoderQualities", &lists) == TIXML_SUCCESS)
-    server->m_transcoderQualities = StringUtils::Split(lists, ",");
-  if (element->QueryStringAttribute("transcoderBitrates", &lists) == TIXML_SUCCESS)
-    server->m_transcoderBitrates = StringUtils::Split(lists, ",");
-  if (element->QueryStringAttribute("transcoderResolutions", &lists) == TIXML_SUCCESS)
-    server->m_transcoderResolutions = StringUtils::Split(lists, ",");
-
-  TiXmlElement* conn = element->FirstChildElement();
-  while (conn)
-  {
-    CPlexConnectionPtr cptr = CPlexConnection::load(conn);
-    if (cptr)
-      server->m_connections.push_back(cptr);
-    conn = conn->NextSiblingElement();
-  }
-
-  return server;
 }

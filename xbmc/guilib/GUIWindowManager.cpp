@@ -445,6 +445,13 @@ void CGUIWindowManager::CloseDialogs(bool forceClose)
 bool CGUIWindowManager::OnAction(const CAction &action)
 {
   CSingleLock lock(g_graphicsContext);
+
+  /* PLEX */
+  // allow  all window manager actions to reset screensaver timeout.
+  // so that events comming from httpremotehandlker can also reset it
+  g_application.ResetScreenSaver();
+  /* END PLEX */
+
   unsigned int topMost = m_activeDialogs.size();
   while (topMost)
   {
@@ -776,6 +783,7 @@ int CGUIWindowManager::GetTopMostModalDialogID(bool ignoreClosing /*= false*/) c
   return WINDOW_INVALID;
 }
 
+/* PLEX */
 int CGUIWindowManager::RemoveThreadMessageByMessageIds(int *pMessageIDList)
 {
   CSingleLock lock(m_critSection);
@@ -800,6 +808,7 @@ int CGUIWindowManager::RemoveThreadMessageByMessageIds(int *pMessageIDList)
   }
   return removedMsgCount;
 }
+/* END PLEX */
 
 void CGUIWindowManager::SendThreadMessage(CGUIMessage& message)
 {

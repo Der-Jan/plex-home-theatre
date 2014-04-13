@@ -6,16 +6,23 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 CPlexGlobalTimer::~CPlexGlobalTimer()
 {
-  if (m_running)
-    StopAllTimers();
+  CSingleLock lk(m_timerLock);
+  m_running = false;
+  m_timerEvent.Set();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexGlobalTimer::StopAllTimers()
 {
+  CSingleLock lk(m_timerLock);
+
   m_running = false;
   m_timeouts.clear();
   CLog::Log(LOGDEBUG, "CPlexGlobalTimer::StopAllTimers signaling the timer thread to quit");
   m_timerEvent.Set();
+
+  lk.unlock();
+
   StopThread(true);
   CLog::Log(LOGDEBUG, "CPlexGlobalTimer::StopAllTimers timer thread dead");
 }
@@ -54,7 +61,7 @@ void CPlexGlobalTimer::SetTimeout(int64_t msec, IPlexGlobalTimeout *callback)
     idx ++;
   }
 
-  CLog::Log(LOGDEBUG, "CPlexGlobalTimer::SetTimeout adding timeout at pos %d", idx);
+  CLog::Log(LOGDEBUG, "CPlexGlobalTimer::SetTimeout adding timeout: %s at pos %d [%lld]", callback->TimerName().c_str(), idx, msec);
   if (idx > m_timeouts.size())
     m_timeouts.push_back(newPair);
   else
@@ -72,13 +79,20 @@ void CPlexGlobalTimer::RemoveTimeout(IPlexGlobalTimeout *callback)
   if (m_timeouts.size() == 0)
     return;
 
-  int idx = -1;
+  CLog::Log(LOGDEBUG, "CPlexGlobalTimer::RemoveTimeout want to remove %s", callback->TimerName().c_str());
+
+  int idx = -1, i = 0;
   BOOST_FOREACH(timeoutPair tmout, m_timeouts)
   {
     if (callback == tmout.second)
+    {
+      idx = i;
       break;
-    idx ++;
+    }
+    i ++;
   }
+
+  CLog::Log(LOGDEBUG, "CPlexGlobaltimer::RemoveTimeout idx is %d for %s", idx, callback->TimerName().c_str());
 
   if (idx == -1)
     return;
@@ -86,6 +100,7 @@ void CPlexGlobalTimer::RemoveTimeout(IPlexGlobalTimeout *callback)
   if (idx > m_timeouts.size())
     return;
 
+  CLog::Log(LOGDEBUG, "CPlexGlobaltimer::RemoveTimeout removing %s %d", callback->TimerName().c_str(), idx);
   m_timeouts.erase(m_timeouts.begin() + idx);
 
   if (idx == 0)
@@ -100,13 +115,42 @@ void CPlexGlobalTimer::RestartTimeout(int64_t msec, IPlexGlobalTimeout *callback
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlexGlobalTimer::RemoveAllTimeoutsByName(const CStdString &name)
+{
+  CSingleLock lk(m_timerLock);
+  std::vector<timeoutPair> toRemove;
+
+  BOOST_FOREACH(timeoutPair p, m_timeouts)
+  {
+    if (name == p.second->TimerName())
+      toRemove.push_back(p);
+  }
+
+  BOOST_FOREACH(timeoutPair p, toRemove)
+    RemoveTimeout(p.second);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlexGlobalTimer::DumpDebug()
+{
+#ifdef _DEBUG
+  CLog::Log(LOGDEBUG, "CPlexGlobalTimer::DumpDebug ******");
+  int i = 0;
+  BOOST_FOREACH(timeoutPair p, m_timeouts)
+  {
+    CLog::Log(LOGDEBUG, "CPlexGlobalTimer::DumpDebug %d - %s (%lld)", i, p.second->TimerName().c_str(), p.first - XbmcThreads::SystemClockMillis());
+    i++;
+  }
+#endif
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexGlobalTimer::Process()
 {
+  CSingleLock lk(m_timerLock);
   m_running = true;
   while (m_running)
   {
-    CSingleLock lk(m_timerLock);
-
     while (m_timeouts.size() == 0)
     {
       CLog::Log(LOGDEBUG, "CPlexGlobalTimer::Process no more timeouts, waiting for them.");
@@ -114,10 +158,9 @@ void CPlexGlobalTimer::Process()
       m_timerEvent.Wait();
       CLog::Log(LOGDEBUG, "CPlexGlobalTimer::StopAllTimers timer thread waking up");
 
-      if (!m_running)
-        break;
-
       lk.lock();
+      if (!m_running)
+        return;
     }
 
     timeoutPair p = m_timeouts.at(0);
@@ -125,14 +168,21 @@ void CPlexGlobalTimer::Process()
 
     m_timerEvent.Reset();
     lk.unlock();
-    CLog::Log(LOGDEBUG, "CPlexGlobalTimer::Process waiting %lld milliseconds...", msecsToSleep);
+    CLog::Log(LOGDEBUG, "CPlexGlobalTimer::Process waiting %lld milliseconds for %s...", msecsToSleep, p.second->TimerName().c_str());
     if (msecsToSleep <= 0 || !m_timerEvent.WaitMSec(msecsToSleep))
     {
       lk.lock();
-      CLog::Log(LOGDEBUG, "CPlexGlobalTimer::Process firing callback");
+      if (!m_running)
+        return;
+
+      CLog::Log(LOGDEBUG, "CPlexGlobalTimer::Process firing callback %s", p.second->TimerName().c_str());
       m_timeouts.erase(m_timeouts.begin());
+      DumpDebug();
       CJobManager::GetInstance().AddJob(new CPlexGlobalTimerJob(p.second), NULL, CJob::PRIORITY_HIGH);
+      lk.unlock();
     }
+
+    lk.lock();
   }
   CLog::Log(LOGDEBUG, "CPlexGlobalTimer::StopAllTimers timer thread quitting");
 }

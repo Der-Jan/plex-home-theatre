@@ -29,21 +29,57 @@
 #include "PlexAnalytics.h"
 #include "GUIUserMessages.h"
 
+#ifdef TARGET_RASPBERRY_PI
+#include <fstream>
+#endif
+
 using namespace XFILE;
+
+
+#ifdef TARGET_RASPBERRY_PI
+
+CStdString CPlexAutoUpdate::readProcCPUInfoValue(CStdString keyname)
+{
+  //std::string foo = "Serial";
+  int index;
+  int keycheck;
+  CStdString result = "";
+  std::ifstream input( "/proc/cpuinfo" );
+  for( CStdString line; getline( input, line ); )
+  {
+    index = line.find(":");
+    keycheck = line.find(keyname);
+    if (index>=0 && keycheck == 0)
+    {
+      result = line.substr(index+2,line.length()-1);
+      CLog::Log(LOGDEBUG,"Read value %s for %s", result.c_str(), keyname.c_str());
+    }
+  }
+  return result;
+}
+
+#endif
+
 
 //#define UPDATE_DEBUG 1
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 CPlexAutoUpdate::CPlexAutoUpdate()
   : m_forced(false), m_isSearching(false), m_isDownloading(false), m_ready(false), m_percentage(0)
 {
-  m_url = CURL("https://my.plexapp.com/updater/products/2/check.xml");
+#if defined(TARGET_RASPBERRY_PI)
+  m_url = CURL("http://updater.rasplex.com/update");
+#else
+  m_url = CURL("https://plex.tv/updater/products/2/check.xml");
+#endif
 
-  m_searchFrequency = 86400000; /* default to 24h */
+  m_searchFrequency = 21600000; /* 6 hours */
 
   CheckInstalledVersion();
 
+  CLog::Log(LOGDEBUG,"CPlexAutoUpdate : Creating Updater, auto=%d",g_guiSettings.GetBool("updates.auto"));
   if (g_guiSettings.GetBool("updates.auto"))
-    g_plexApplication.timer.SetTimeout(5 * 1000, this);
+    g_plexApplication.timer->SetTimeout(5 * 1000, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,7 +87,8 @@ void CPlexAutoUpdate::CheckInstalledVersion()
 {
   if (g_application.GetReturnedFromAutoUpdate())
   {
-    CLog::Log(LOGDEBUG, "CPlexAutoUpdate::CheckInstalledVersion We are returning from a autoupdate with version %s", g_infoManager.GetVersion().c_str());
+    CStdString currentVersion = g_infoManager.GetVersion();
+    CLog::Log(LOGDEBUG, "CPlexAutoUpdate::CheckInstalledVersion We are returning from a autoupdate with version %s", currentVersion.c_str());
 
     std::string version, packageHash, fromVersion;
     bool isDelta;
@@ -59,10 +96,14 @@ void CPlexAutoUpdate::CheckInstalledVersion()
 
     if (GetUpdateInfo(version, isDelta, packageHash, fromVersion))
     {
-      if (version != g_infoManager.GetVersion())
+      if (version != currentVersion)
       {
-        CLog::Log(LOGDEBUG, "CPlexAutoUpdate::CheckInstalledVersion Seems like we failed to upgrade from %s to %s, will NOT try this version again.", fromVersion.c_str(), g_infoManager.GetVersion().c_str());
-        success = false;
+        #ifndef TARGET_RASPBERRY_PI
+          CLog::Log(LOGDEBUG, "CPlexAutoUpdate::CheckInstalledVersion Seems like we failed to upgrade from %s to %s, will NOT try this version again.", fromVersion.c_str(), currentVersion.c_str());
+          success = false;
+        #else
+          success = true;
+        #endif
       }
       else
       {
@@ -82,15 +123,36 @@ void CPlexAutoUpdate::OnTimeout()
   CPlexDirectory dir;
   m_isSearching = true;
 
+  CLog::Log(LOGDEBUG,"CPlexAutoUpdate::OnTimeout Starting");
+
+  CStdString currentVersion = g_infoManager.GetVersion();
+
 #ifdef UPDATE_DEBUG
   m_url.SetOption("version", "1.0.0.117-a97636ae");
 #else
-  m_url.SetOption("version", g_infoManager.GetVersion());
+  m_url.SetOption("version", currentVersion);
 #endif
   m_url.SetOption("build", PLEX_BUILD_TAG);
 
+#if defined(TARGET_DARWIN)
+  m_url.SetOption("distribution", "macosx");
+#elif defined(TARGET_WINDOWS)
+  m_url.SetOption("distribution", "windows");
+#elif defined(TARGET_LINUX) && defined(TARGET_RASPBERRY_PI)
+  m_url.SetOption("distribution", "rasplex");
+#elif defined(TARGET_LINUX) && defined(OPENELEC)
+  m_url.SetOption("distribution", "openelec");
+#endif
+
+#ifdef TARGET_RASPBERRY_PI
+  m_url.SetOption("serial", readProcCPUInfoValue("Serial"));
+  m_url.SetOption("revision", readProcCPUInfoValue("Revision"));
+#endif
+
   int channel = g_guiSettings.GetInt("updates.channel");
+#ifndef TARGET_RASPBERRY_PI
   if (channel != CMyPlexUserInfo::ROLE_USER)
+#endif
     m_url.SetOption("channel", boost::lexical_cast<std::string>(channel));
 
   if (g_plexApplication.myPlexManager->IsSignedIn())
@@ -110,7 +172,7 @@ void CPlexAutoUpdate::OnTimeout()
         CFileItemPtr updateItem = list.Get(i);
         if (updateItem->HasProperty("version") &&
             updateItem->GetProperty("autoupdate").asBoolean() &&
-            updateItem->GetProperty("version").asString() != g_infoManager.GetVersion())
+            updateItem->GetProperty("version").asString() != currentVersion)
         {
           CLog::Log(LOGDEBUG, "CPlexAutoUpdate::OnTimeout got version %s from update endpoint", updateItem->GetProperty("version").asString().c_str());
           if (std::find(alreadyTriedVersion.begin(), alreadyTriedVersion.end(), updateItem->GetProperty("version").asString()) == alreadyTriedVersion.end())
@@ -147,7 +209,8 @@ void CPlexAutoUpdate::OnTimeout()
 
     if (m_forced)
     {
-      CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Info, "Update available!", "A new version is downloading in the background", 10000, false);
+      CStdString version = selectedItem->GetProperty("version").asString();
+      CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Info, "Update available!", "Version "+version+" is downloading in the background", 10000, false);
       m_forced = false;
     }
     return;
@@ -162,13 +225,14 @@ void CPlexAutoUpdate::OnTimeout()
   }
 
   if (g_guiSettings.GetBool("updates.auto"))
-    g_plexApplication.timer.SetTimeout(m_searchFrequency, this);
+    g_plexApplication.timer->SetTimeout(m_searchFrequency, this);
 
   m_isSearching = false;
   CGUIMessage msg(GUI_MSG_UPDATE, WINDOW_SETTINGS_SYSTEM, WINDOW_SETTINGS_MYPICTURES);
   CApplicationMessenger::Get().SendGUIMessage(msg, WINDOW_SETTINGS_SYSTEM);
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 CFileItemPtr CPlexAutoUpdate::GetPackage(CFileItemPtr updateItem)
 {
   CFileItemPtr deltaItem, fullItem;
@@ -192,8 +256,14 @@ CFileItemPtr CPlexAutoUpdate::GetPackage(CFileItemPtr updateItem)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlexAutoUpdate::NeedDownload(const std::string& localFile, const std::string& expectedHash)
+bool CPlexAutoUpdate::NeedDownload(const std::string& localFile, const std::string& expectedHash, bool isManifest)
 {
+#ifdef OPENELEC
+  // Manifest is not needed in OpenELEC
+  if (isManifest)
+    return false;
+#endif
+
   if (CFile::Exists(localFile, false) && PlexUtils::GetSHA1SumFromURL(CURL(localFile)) == expectedHash)
   {
     CLog::Log(LOGDEBUG, "CPlexAutoUpdate::DownloadUpdate we already have %s with correct SHA", localFile.c_str());
@@ -202,6 +272,7 @@ bool CPlexAutoUpdate::NeedDownload(const std::string& localFile, const std::stri
   return true;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::DownloadUpdate(CFileItemPtr updateItem)
 {
   if (m_downloadItem)
@@ -226,14 +297,15 @@ void CPlexAutoUpdate::DownloadUpdate(CFileItemPtr updateItem)
   m_localManifest = "special://temp/autoupdate/manifest-" + m_downloadItem->GetProperty("version").asString() + "." + packageStr + ".xml";
   m_localBinary = "special://temp/autoupdate/binary-" + m_downloadItem->GetProperty("version").asString() + "." + packageStr + ".zip";
 
-  if (NeedDownload(m_localManifest, m_downloadPackage->GetProperty("manifestHash").asString()))
+
+  if (NeedDownload(m_localManifest, m_downloadPackage->GetProperty("manifestHash").asString(), true))
   {
     CLog::Log(LOGDEBUG, "CPlexAutoUpdate::DownloadUpdate need %s", manifestUrl.c_str());
     CJobManager::GetInstance().AddJob(new CPlexDownloadFileJob(manifestUrl, m_localManifest), this, CJob::PRIORITY_LOW);
     m_needManifest = true;
   }
 
-  if (NeedDownload(m_localBinary, m_downloadPackage->GetProperty("fileHash").asString()))
+  if (NeedDownload(m_localBinary, m_downloadPackage->GetProperty("fileHash").asString(), false))
   {
     CLog::Log(LOGDEBUG, "CPlexAutoUpdate::DownloadUpdate need %s", m_localBinary.c_str());
     CJobManager::GetInstance().AddJob(new CPlexDownloadFileJob(updateUrl, m_localBinary), this, CJob::PRIORITY_LOW);
@@ -244,6 +316,7 @@ void CPlexAutoUpdate::DownloadUpdate(CFileItemPtr updateItem)
     ProcessDownloads();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 std::vector<std::string> CPlexAutoUpdate::GetAllInstalledVersions() const
 {
   CXBMCTinyXML doc;
@@ -265,6 +338,7 @@ std::vector<std::string> CPlexAutoUpdate::GetAllInstalledVersions() const
   return versions;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexAutoUpdate::GetUpdateInfo(std::string& verStr, bool& isDelta, std::string& packageHash, std::string& fromVersion) const
 {
   CXBMCTinyXML doc;
@@ -307,6 +381,7 @@ bool CPlexAutoUpdate::GetUpdateInfo(std::string& verStr, bool& isDelta, std::str
   return true;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::WriteUpdateInfo()
 {
   CXBMCTinyXML doc;
@@ -324,9 +399,12 @@ void CPlexAutoUpdate::WriteUpdateInfo()
 
   TiXmlElement thisVersion("version");
   thisVersion.SetAttribute("version", m_downloadItem->GetProperty("version").asString());
+#ifndef TARGET_RASPBERRY_PI
   thisVersion.SetAttribute("delta", m_downloadPackage->GetProperty("delta").asBoolean());
   thisVersion.SetAttribute("packageHash", m_downloadPackage->GetProperty("manifestHash").asString());
+#endif
   thisVersion.SetAttribute("fromVersion", std::string(g_infoManager.GetVersion()));
+
   thisVersion.SetAttribute("installtime", time(NULL));
 
   if (versions->FirstChildElement())
@@ -335,8 +413,29 @@ void CPlexAutoUpdate::WriteUpdateInfo()
     versions->InsertEndChild(thisVersion);
 
   doc.SaveFile("special://profile/plexupdateinfo.xml");
+
+#ifdef TARGET_RASPBERRY_PI
+
+  CURL callback = CURL("http://updater.rasplex.com/updated");
+  callback.SetOption("version", m_downloadItem->GetProperty("version").asString());
+  callback.SetOption("fromVersion", std::string(g_infoManager.GetVersion()));
+  callback.SetOption("serial", readProcCPUInfoValue("Serial"));
+  callback.SetOption("revision", readProcCPUInfoValue("Revision"));
+  int channel = g_guiSettings.GetInt("updates.channel");
+  callback.SetOption("channel", boost::lexical_cast<std::string>(channel));
+
+  CStdString data;
+  XFILE::CCurlFile m_http;
+  bool httpSuccess = m_http.Get(callback.Get(), data);
+
+  if (httpSuccess)
+    CLog::Log(LOGINFO, "CPlexAutoUpdate::WriteUpdateInfo updated, got %s seconds", data.c_str());
+  else
+    CLog::Log(LOGERROR, "CPlexAutoUpdate::WriteUpdateInfo failed to update, got %s seconds", data.c_str());
+#endif
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::ProcessDownloads()
 {
   CStdString verStr;
@@ -354,6 +453,7 @@ void CPlexAutoUpdate::ProcessDownloads()
   m_ready = true;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::OnJobComplete(unsigned int jobID, bool success, CJob *job)
 {
   CPlexDownloadFileJob *fj = static_cast<CPlexDownloadFileJob*>(job);
@@ -361,7 +461,7 @@ void CPlexAutoUpdate::OnJobComplete(unsigned int jobID, bool success, CJob *job)
   {
     if (fj->m_destination == m_localManifest)
     {
-      if (NeedDownload(m_localManifest, m_downloadPackage->GetProperty("manifestHash").asString()))
+      if (NeedDownload(m_localManifest, m_downloadPackage->GetProperty("manifestHash").asString(), true))
       {
         CLog::Log(LOGWARNING, "CPlexAutoUpdate::OnJobComplete failed to download manifest, SHA mismatch. Retrying in %d seconds", m_searchFrequency);
         return;
@@ -372,7 +472,7 @@ void CPlexAutoUpdate::OnJobComplete(unsigned int jobID, bool success, CJob *job)
     }
     else if (fj->m_destination == m_localBinary)
     {
-      if (NeedDownload(m_localBinary, m_downloadPackage->GetProperty("fileHash").asString()))
+      if (NeedDownload(m_localBinary, m_downloadPackage->GetProperty("fileHash").asString(), false))
       {
         CLog::Log(LOGWARNING, "CPlexAutoUpdate::OnJobComplete failed to download update, SHA mismatch. Retrying in %d seconds", m_searchFrequency);
         return;
@@ -386,8 +486,8 @@ void CPlexAutoUpdate::OnJobComplete(unsigned int jobID, bool success, CJob *job)
   }
   else if (!success)
   {
-    CLog::Log(LOGWARNING, "CPlexAutoUpdate::OnJobComplete failed to run a download job, will retry in %d seconds.", m_searchFrequency);
-    g_plexApplication.timer.SetTimeout(m_searchFrequency, this);
+    CLog::Log(LOGWARNING, "CPlexAutoUpdate::OnJobComplete failed to run a download job, will retry in %d milliseconds.", m_searchFrequency);
+    g_plexApplication.timer->SetTimeout(m_searchFrequency, this);
     return;
   }
 
@@ -395,6 +495,7 @@ void CPlexAutoUpdate::OnJobComplete(unsigned int jobID, bool success, CJob *job)
     ProcessDownloads();
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::OnJobProgress(unsigned int jobID, unsigned int progress, unsigned int total, const CJob *job)
 {
   const CPlexDownloadFileJob *fj = static_cast<const CPlexDownloadFileJob*>(job);
@@ -410,6 +511,7 @@ void CPlexAutoUpdate::OnJobProgress(unsigned int jobID, unsigned int progress, u
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexAutoUpdate::RenameLocalBinary()
 {
   CXBMCTinyXML doc;
@@ -463,6 +565,7 @@ bool CPlexAutoUpdate::RenameLocalBinary()
 #define MAXPATHLEN 1024
 #endif
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 std::string quoteArgs(const std::list<std::string>& arguments)
 {
 	std::string quotedArgs;
@@ -487,6 +590,8 @@ std::string quoteArgs(const std::list<std::string>& arguments)
 	return quotedArgs;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#ifndef OPENELEC
 void CPlexAutoUpdate::UpdateAndRestart()
 {  
   /* first we need to copy the updater app to our tmp directory, it might change during install.. */
@@ -646,20 +751,32 @@ void CPlexAutoUpdate::UpdateAndRestart()
 #endif
 }
 
+#else
+
+void CPlexAutoUpdate::UpdateAndRestart()
+{
+    CJobManager::GetInstance().AddJob(new CPlexUpdaterJob(this, m_localBinary), this, CJob::PRIORITY_HIGH);
+}
+
+#endif
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::ForceVersionCheckInBackground()
 {
   m_forced = true;
   m_isSearching = true;
 
   // restart with a short time out, just to make sure that we get it running in the background thread
-  g_plexApplication.timer.RestartTimeout(1, this);
+  g_plexApplication.timer->RestartTimeout(1, this);
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlexAutoUpdate::ResetTimer()
 {
   if (g_guiSettings.GetBool("updates.auto"))
   {
-    g_plexApplication.timer.RestartTimeout(m_searchFrequency, this);
+    g_plexApplication.timer->RestartTimeout(m_searchFrequency, this);
   }
 }
 
@@ -667,7 +784,7 @@ void CPlexAutoUpdate::ResetTimer()
 void CPlexAutoUpdate::PokeFromSettings()
 {
   if (g_guiSettings.GetBool("updates.auto"))
-    g_plexApplication.timer.RestartTimeout(m_searchFrequency, this);
+    g_plexApplication.timer->RestartTimeout(m_searchFrequency, this);
   else if (!g_guiSettings.GetBool("updates.auto"))
-    g_plexApplication.timer.RemoveTimeout(this);
+    g_plexApplication.timer->RemoveTimeout(this);
 }

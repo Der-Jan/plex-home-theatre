@@ -1263,3 +1263,5 @@ plex/Dependencies/built-depends/*
 *.files
 
 *.includes
+*.AppleDouble
+GitRevision.txt

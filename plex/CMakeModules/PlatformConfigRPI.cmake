@@ -2,11 +2,7 @@
 
 set(EXTRA_CFLAGS "-fPIC -DPIC")
 
-if(UNIX)
-  set(CMAKE_REQUIRED_FLAGS "-D__LINUX_USER__")
-endif()
 
-#option(USE_INTERNAL_FFMPEG "" ON)
 option(USE_INTERNAL_FFMPEG "" OFF)
 
 set(LINK_PKG
@@ -39,6 +35,9 @@ else()
 endif()
 
 
+if(ENABLE_PYTHON)
+   list(APPEND LINK_PKG Python)
+endif(ENABLE_PYTHON)
 
 
 #        --disable-optical-drive 
@@ -132,7 +131,6 @@ add_definitions(
     -DTARGET_RPI
     -DHAS_GLES=2
     -DHAVE_LIBGLESV2
-    -DHAS_EGL
     -DHAVE_OMXLIB
     -DOMX_SKIP64BIT
     -DHAS_BUILTIN_SYNC_ADD_AND_FETCH
@@ -148,22 +146,36 @@ add_definitions(
     -DNDEBUG=1 
     -DDEBUG
     -DUSE_RAPIDXML
+    -DENABLE_AUTOUPDATE
+    -DOPENELEC
 )
 
-#include_directories(
-#    /opt/vc/include/ 
-#    /opt/vc/include/EGL 
-#   # /opt/vc/include/GLES 
-#    /opt/vc/include/GLES2 
-#    /opt/vc/include/KHR 
-#    /opt/vc/include/VG 
-#    /opt/vc/include/WF 
-#    /opt/vc/include/vc/include  
-#)
+## remove annying useless warnings
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-reorder")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-format")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-address")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sequence-point")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-parentheses")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-array-bounds")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-value")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-switch")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-pointer-arith")
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-maybe-uninitialized")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-but-set-variable")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-array-bounds")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-function")
 
-
-
+#set(CMAKE_EXE_LINKER_FLAGS_DEBUG  "${CMAKE_EXE_FLAGS} -Wno-clobbered")
 
 plex_find_library(GLESv2 0  0 system/usr/lib 1)
 plex_find_library(EGL 0 0  system/usr/lib 1)
@@ -172,8 +184,6 @@ plex_find_library(bcm_host 0 0  system/usr/lib 1)
 plex_find_library(vchiq_arm 0 0  system/usr/lib 1)
 plex_find_library(dbus-1 0 0  system/usr/lib 1)
 
-
-plex_find_library(python2.7 0 1 ${RPI_EXTERNAL_PYTHON_HOME}/lib 1)
 
 #needed for the commandline flag CMAKE_INCLUDE_PATH
 foreach(path ${CMAKE_INCLUDE_PATH})

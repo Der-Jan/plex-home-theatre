@@ -142,13 +142,21 @@ CPlexDirectoryTypeParserTrack::Process(CFileItem &item, CFileItem &mediaContaine
   if (item.m_mediaItems.size() > 0)
   {
     CFileItemPtr firstMedia = item.m_mediaItems[0];
-    item.m_mapProperties.insert(firstMedia->m_mapProperties.begin(), firstMedia->m_mapProperties.end());
+    const PropertyMap pMap = firstMedia->GetAllProperties();
+    std::pair<CStdString, CVariant> p;
+    BOOST_FOREACH(p, pMap)
+      item.SetProperty(p.first, p.second);
 
     if (firstMedia->m_mediaParts.size() > 0)
       song.strFileName = firstMedia->m_mediaParts[0]->GetPath();
   }
 
   item.SetFromSong(song);
+
+  if (item.HasProperty("playQueueItemID"))
+    item.GetMusicInfoTag()->SetDatabaseId(item.GetProperty("playQueueItemID").asInteger(), "song");
+  else
+    item.GetMusicInfoTag()->SetDatabaseId(item.GetProperty("ratingKey").asInteger(), "song");
 }
 
 void CPlexDirectoryTypeParserArtist::Process(CFileItem &item, CFileItem &mediaContainer, XML_ELEMENT *itemElement)
@@ -183,4 +191,6 @@ void CPlexDirectoryTypeParserArtist::Process(CFileItem &item, CFileItem &mediaCo
     else if (tagItem && tagItem->GetPlexDirectoryType() == PLEX_DIR_TYPE_THUMB)
       item.SetArt(PLEX_ART_THUMB, thumbIdx ++, tagItem->GetPath());
   }
+
+  item.GetMusicInfoTag()->SetDatabaseId(item.GetProperty("ratingKey").asInteger(), "artist");
 }

@@ -14,10 +14,13 @@
 #include "PlexThemeMusicPlayer.h"
 
 #include "dialogs/GUIDialogBusy.h"
+#include "dialogs/GUIDialogOK.h"
 #include "dialogs/GUIDialogKeyboardGeneric.h"
 #include "dialogs/GUIDialogYesNo.h"
 #include "PlexJobs.h"
 #include "Client/PlexServerManager.h"
+#include "guilib/GUIWindowManager.h"
+#include "LocalizeStrings.h"
 
 #include "DirectoryCache.h"
 
@@ -25,6 +28,7 @@
 CGUIWindowPlexPreplayVideo::CGUIWindowPlexPreplayVideo(void)
  : CGUIMediaWindow(WINDOW_PLEX_PREPLAY_VIDEO, "PlexPreplayVideo.xml")
 {
+  m_navigating = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -55,7 +59,6 @@ bool CGUIWindowPlexPreplayVideo::OnMessage(CGUIMessage &message)
       CLog::Log(LOGDEBUG, "CGUIWindowPlexPreplayVideo::OnMessage(deinit) killing local item out of directory cache");
       g_directoryCache.ClearDirectory(item->GetPath());
     }
-
   }
   else if (message.GetMessage() == GUI_MSG_CLICKED)
   {
@@ -71,6 +74,8 @@ bool CGUIWindowPlexPreplayVideo::OnMessage(CGUIMessage &message)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGUIWindowPlexPreplayVideo::OnAction(const CAction &action)
 {
+  g_plexApplication.timer->RemoveAllTimeoutsByName("navigationTimeout");
+
   if (action.GetID() == ACTION_PLAYER_PLAY)
   {
     PlexContentPlayerMixin::PlayPlexItem(g_plexApplication.m_preplayItem);
@@ -111,6 +116,12 @@ bool CGUIWindowPlexPreplayVideo::OnAction(const CAction &action)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CGUIWindowPlexPreplayVideo::MoveToItem(int idx)
 {
+  CSingleLock lk(m_navigationLock);
+  if (m_navigating) return;
+
+  m_navigating = true;
+  lk.Leave();
+
   CFileItemPtr item = m_vecItems->Get(0);
   if (item && item->GetPlexDirectoryType() == PLEX_DIR_TYPE_EPISODE)
   {
@@ -132,7 +143,11 @@ void CGUIWindowPlexPreplayVideo::MoveToItem(int idx)
             {
               CFileItemPtr i2 = list.Get(i + idx);
               if (!i2)
+              {
+                lk.Enter();
+                m_navigating = false;
                 return;
+              }
 
               if (m_navHelper.CacheUrl(i2->GetPath(), cancel))
                 Update(i2->GetPath(), false);
@@ -142,6 +157,9 @@ void CGUIWindowPlexPreplayVideo::MoveToItem(int idx)
       }
     }
   }
+
+  lk.Enter();
+  m_navigating = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -281,8 +299,11 @@ void CGUIWindowPlexPreplayVideo::UpdateItem()
 
   m_vecItems->SetProperty("PlexPreplay", "yes");
 
-  g_plexApplication.m_preplayItem = m_vecItems->Get(0);
-  g_plexApplication.themeMusicPlayer->playForItem(*m_vecItems->Get(0));
+  if (m_vecItems->Size() > 0 && m_vecItems->Get(0))
+  {
+    g_plexApplication.m_preplayItem = m_vecItems->Get(0);
+    g_plexApplication.themeMusicPlayer->playForItem(*m_vecItems->Get(0));
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

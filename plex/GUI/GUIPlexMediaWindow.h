@@ -58,18 +58,18 @@ class CGUIPlexMediaWindow : public CGUIMediaWindow, public IJobCallback, public 
     bool OnPlayMedia(int iItem);
     bool OnContextButton(int itemNumber, CONTEXT_BUTTON button);
 
-    void ShuffleItem(CFileItemPtr item);
-    void QueueItem(CFileItemPtr item);
-    void QueueItems(const CFileItemList &list, CFileItemPtr startItem=CFileItemPtr());
-
     bool OnBack(int actionID);
     void OnFilterButton(int filterButtonId);
     void OnFilterSelected(const std::string& filterKey, int filterButtonId);
     static CURL GetRealDirectoryUrl(const CStdString &strDirectory);
 
     void CheckPlexFilters(CFileItemList &list);
+    void UpdateButtons();
+    void PlayAll(bool shuffle, const CFileItemPtr &fromHere = CFileItemPtr());
+    void PlayAllPlayQueue(const CPlexServerPtr &server, bool shuffle, const CFileItemPtr &fromHere);
+    void PlayAllLocalPlaylist(bool shuffle, const CFileItemPtr &fromHere);
 
-  private:
+private:
     void AddFilters();
 
     bool IsVideoContainer(CFileItemPtr item=CFileItemPtr()) const;

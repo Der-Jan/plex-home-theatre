@@ -136,6 +136,7 @@
 #include "AutoUpdate/PlexAutoUpdate.h"
 #include "plex/GUI/GUIWindowPlexStartupHelper.h"
 #include "PlexMediaDecisionEngine.h"
+#include "PlexAnalytics.h"
 /* END PLEX */
 
 using namespace std;
@@ -2263,6 +2264,10 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
       pSettingString->SetLabel(44003);
     }
   }
+  else if (strSetting.Equals("myplex.hidecloudsync"))
+  {
+    g_plexApplication.myPlexManager->Rescan();
+  }
   else if (strSetting.Equals("backgroundmusic.thememusicenabled") || strSetting.Left(23).Equals("backgroundmusic.bgmusic"))
   {
     CGUIMessage msg(GUI_MSG_BG_MUSIC_SETTINGS_UPDATED, 0, 0);
@@ -2334,7 +2339,13 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
   {
     CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(pSettingControl->GetID());
     g_guiSettings.SetInt("updates.channel", pControl->GetValue());
-    CLog::Log(LOGDEBUG, "CGUIWindowSettingsCategory::OnSettingsChanged updates.channel = %d", pControl->GetValue());
+  }
+  else if (strSetting.Equals("advanced.collectanalytics"))
+  {
+    if (g_guiSettings.GetBool(strSetting))
+      g_plexApplication.analytics->startLogging();
+    else
+      g_plexApplication.analytics->stopLogging();
   }
   /* END PLEX */
 
@@ -3356,8 +3367,12 @@ void CGUIWindowSettingsCategory::FillInPlexUpdateChannels(CSetting *pSetting)
 
   pControl->AddLabel(g_localizeStrings.Get(40003), CMyPlexUserInfo::ROLE_USER);
 
+#ifdef TARGET_RASPBERRY_PI
+  pControl->AddLabel("PreRelease", CMyPlexUserInfo::ROLE_EMPLOYEE);
+#else
   if (user.hasRole(CMyPlexUserInfo::ROLE_PLEXPASS) || user.hasRole(CMyPlexUserInfo::ROLE_NINJA) || user.hasRole(CMyPlexUserInfo::ROLE_EMPLOYEE))
     pControl->AddLabel(g_localizeStrings.Get(40004), CMyPlexUserInfo::ROLE_PLEXPASS);
+#endif
 
   if (user.hasRole(CMyPlexUserInfo::ROLE_NINJA) || user.hasRole(CMyPlexUserInfo::ROLE_EMPLOYEE))
     pControl->AddLabel(g_localizeStrings.Get(40005), CMyPlexUserInfo::ROLE_NINJA);

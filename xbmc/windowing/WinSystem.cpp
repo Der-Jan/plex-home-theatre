@@ -91,6 +91,22 @@ void CWinSystemBase::UpdateResolutions()
 
 void CWinSystemBase::SetWindowResolution(int width, int height)
 {
+  /* PLEX */
+  // some times SDL seems to go really bonkers, so we need to cap the resolution
+  // information in some sane way
+
+  RESOLUTION_INFO& desktopInfo = g_settings.m_ResInfo[RES_DESKTOP];
+  width = std::min(width, desktopInfo.iWidth);
+  height = std::min(height, desktopInfo.iHeight);
+
+  // not smaller than sensible values,
+  width = std::max(width, 1024);
+  height = std::max(height, 576);
+
+  // Maintain 16:9 AR.
+  height = (width * 9) / 16;
+  /* END PLEX */
+
   RESOLUTION_INFO& window = g_settings.m_ResInfo[RES_WINDOW];
   window.iWidth = width;
   window.iHeight = height;

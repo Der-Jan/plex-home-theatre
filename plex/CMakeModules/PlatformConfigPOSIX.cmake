@@ -10,9 +10,14 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
 endif(CMAKE_C_COMPILER_ID STREQUAL "Clang")
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe -Wno-parentheses-equality -Wno-self-assign-field")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -Wno-parentheses-equality -Wno-self-assign-field")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe")
 endif(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")  
+
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-parentheses-equality -Wno-self-assign-field")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-parentheses-equality -Wno-self-assign-field")
+endif(CMAKE_C_COMPILER_ID STREQUAL "Clang")
 
 ############ Set global CFlags with the information from the subroutines
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_CFLAGS}")
@@ -23,12 +28,19 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
 
 ############ Generate debug symbols even when we build for Release
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g -O3")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g -O3")
+if(TARGET_RPI)
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g -O3")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g -O3")
+else(TARGET_RPI)
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g -Os")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g -Os")
+endif(TARGET_RPI)
 
 ############ Check for pthread_setname -> HAVE_PTHREAD_SETNAME_NP
 set(HAVE_PTHREAD_SETNAME_NP 1)
-set(HAS_SDL_JOYSTICK 1)
+if(NOT TARGET_RPI)
+  set(HAS_SDL_JOYSTICK 1)
+endif()
 set(HAS_LIBRTMP 1)
 
 if(NOT USE_INTERNAL_FFMPEG)

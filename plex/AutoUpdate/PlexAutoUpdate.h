@@ -46,6 +46,8 @@ class CPlexAutoUpdate : public IJobCallback, public IPlexGlobalTimeout
 
     int GetDownloadPercentage() const { return m_percentage; }
 
+    CStdString TimerName() const { return "autoupdate"; }
+
   private:
     void CheckInstalledVersion();
     void DownloadUpdate(CFileItemPtr updateItem);
@@ -71,9 +73,13 @@ class CPlexAutoUpdate : public IJobCallback, public IPlexGlobalTimeout
     bool m_ready;
 
     CFileItemPtr GetPackage(CFileItemPtr updateItem);
-    bool NeedDownload(const std::string& localFile, const std::string& expectedHash);
+    bool NeedDownload(const std::string& localFile, const std::string& expectedHash, bool isManifest);
     bool RenameLocalBinary();
     int m_percentage;
+
+#ifdef TARGET_RASPBERRY_PI
+    CStdString readProcCPUInfoValue(CStdString keyname);
+#endif
 
     std::vector<std::string> GetAllInstalledVersions() const;
 };

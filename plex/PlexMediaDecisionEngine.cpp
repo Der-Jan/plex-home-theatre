@@ -19,16 +19,30 @@
 #include "dialogs/GUIDialogBusy.h"
 #include "guilib/GUIWindowManager.h"
 #include "PlexApplication.h"
+#include "AdvancedSettings.h"
 
 bool CPlexMediaDecisionEngine::BlockAndResolve(const CFileItem &item, CFileItem &resolvedItem)
 {
-  if (item.GetProperty("isResolved").asBoolean())
-  {
-    resolvedItem = item;
-    return true;
-  }
 
   m_item = item;
+
+  // if we are trasnscoding (Matroska), then we want to rebuild the trasncoding url for seeking
+  if (m_item.GetProperty("plexDidTranscode").asBoolean())
+  {
+    CPlexServerPtr server = g_plexApplication.serverManager->FindByUUID(item.GetProperty("plexserver").asString());
+
+    if ( (CPlexTranscoderClient::getServerTranscodeMode(server) == CPlexTranscoderClient::PLEX_TRANSCODE_MODE_MKV) )
+    {
+      CStdString transcodeURL = CPlexTranscoderClient::GetTranscodeURL(server, m_item).Get();
+      m_item.SetPath(transcodeURL);
+    }
+  }
+
+  if (item.GetProperty("isResolved").asBoolean())
+  {
+    resolvedItem = m_item;
+    return true;
+  }
 
   m_done.Reset();
   Create();
@@ -225,7 +239,7 @@ void CPlexMediaDecisionEngine::ChooseMedia()
   if (m_item.HasProperty("selectedMediaItem"))
     m_choosenMedia.SetProperty("selectedMediaItem", m_item.GetProperty("selectedMediaItem"));
 
-  CFileItemPtr mediaItem = getSelecteMediaItem(m_choosenMedia);
+  CFileItemPtr mediaItem = getSelectedMediaItem(m_choosenMedia);
   if (!mediaItem)
   {
     m_success = false;
@@ -269,7 +283,7 @@ void CPlexMediaDecisionEngine::ChooseMedia()
   {
     /* find the server for the item */
     CPlexServerPtr server = g_plexApplication.serverManager->FindByUUID(m_choosenMedia.GetProperty("plexserver").asString());
-    if (server && CPlexTranscoderClient::ShouldTranscode(server, m_choosenMedia))
+    if (server && CPlexTranscoderClient::GetInstance()->ShouldTranscode(server, m_choosenMedia))
     {
       CLog::Log(LOGDEBUG, "CPlexMediaDecisionEngine::ChooseMedia Item should be transcoded");
       m_choosenMedia.SetPath(CPlexTranscoderClient::GetTranscodeURL(server, m_choosenMedia).Get());
@@ -289,7 +303,7 @@ void CPlexMediaDecisionEngine::ChooseMedia()
  * properties, so we need to rely on the correct indexing. Let's trust that
  * shall we
  */
-CFileItemPtr CPlexMediaDecisionEngine::getSelecteMediaItem(const CFileItem &item)
+CFileItemPtr CPlexMediaDecisionEngine::getSelectedMediaItem(const CFileItem &item)
 {
   int mediaItemIdx = 0;
   CFileItemPtr mediaItem;
@@ -319,7 +333,7 @@ CFileItemPtr CPlexMediaDecisionEngine::getSelecteMediaItem(const CFileItem &item
  * or leave blank to use the current selected or first one in the lists */
 CFileItemPtr CPlexMediaDecisionEngine::getMediaPart(const CFileItem &item, int partId)
 {
-  CFileItemPtr mediaItem = getSelecteMediaItem(item);
+  CFileItemPtr mediaItem = getSelectedMediaItem(item);
   if (mediaItem && mediaItem->m_mediaParts.size() > 0)
   {
     if (partId == -1)
@@ -337,7 +351,7 @@ CFileItemPtr CPlexMediaDecisionEngine::getMediaPart(const CFileItem &item, int p
 
 void CPlexMediaDecisionEngine::ProcessStack(const CFileItem& item, const CFileItemList &stack)
 {
-  CFileItemPtr mediaItem = getSelecteMediaItem(item);
+  CFileItemPtr mediaItem = getSelectedMediaItem(item);
   int64_t totalDuration = 0;
   
   for (int i = 0; i < stack.Size(); i++)

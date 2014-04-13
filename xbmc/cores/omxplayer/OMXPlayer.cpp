@@ -509,10 +509,7 @@ bool COMXPlayer::OpenFile(const CFileItem &file, const CPlayerOptions &options)
     g_renderManager.PreInit();
 
     Create();
-
-    // this timeout needs to be big enough, otherwise will not be enough
-    // for proper playback on devices like RPi
-    if(!m_ready.WaitMSec(5000))
+    if(!m_ready.WaitMSec(100))
     {
       CGUIDialogBusy* dialog = (CGUIDialogBusy*)g_windowManager.GetWindow(WINDOW_DIALOG_BUSY);
       if(dialog)
@@ -2498,12 +2495,13 @@ void COMXPlayer::HandleMessages()
         if (speed != DVD_PLAYSPEED_PAUSE && m_playSpeed != DVD_PLAYSPEED_PAUSE && speed != m_playSpeed)
           m_callback.OnPlayBackSpeedChanged(speed / DVD_PLAYSPEED_NORMAL);
 
+#ifndef __PLEX__
         if (m_pInputStream->IsStreamType(DVDSTREAM_TYPE_PVRMANAGER) && speed != m_playSpeed)
         {
           CDVDInputStreamPVRManager* pvrinputstream = static_cast<CDVDInputStreamPVRManager*>(m_pInputStream);
           pvrinputstream->Pause( speed == 0 );
         }
-
+#endif
         // if playspeed is different then DVD_PLAYSPEED_NORMAL or DVD_PLAYSPEED_PAUSE
         // audioplayer, stops outputing audio to audiorender, but still tries to
         // sleep an correct amount for each packet
@@ -2660,12 +2658,10 @@ void COMXPlayer::SetCaching(ECacheState state)
 
 void COMXPlayer::SetPlaySpeed(int speed)
 {
-// FWD / REW Speeds seems ok with OMX on RPi
-#if !defined(TARGET_RASPBERRY_PI)
   /* only pause and normal playspeeds are allowed */
   if(speed < 0 || speed > DVD_PLAYSPEED_NORMAL)
     return;
-#endif
+
   m_messenger.Put(new CDVDMsgInt(CDVDMsg::PLAYER_SETSPEED, speed));
   SynchronizeDemuxer(100);
 }
@@ -3144,8 +3140,6 @@ int64_t COMXPlayer::GetTotalTime()
 
 void COMXPlayer::ToFFRW(int iSpeed)
 {
-// FWD / RWIND Speeds dont seem to be an issue on RPi
-#if !defined(TARGET_RASPBERRY_PI)
   // can't rewind in menu as seeking isn't possible
   // forward is fine
   if (iSpeed < 0 && IsInMenu()) return;
@@ -3153,7 +3147,6 @@ void COMXPlayer::ToFFRW(int iSpeed)
   /* only pause and normal playspeeds are allowed */
   if(iSpeed > 1 || iSpeed < 0)
     return;
-#endif
 
   SetPlaySpeed(iSpeed * DVD_PLAYSPEED_NORMAL);
 }
@@ -4566,6 +4559,10 @@ void COMXPlayer::OpenDefaultStreams(bool reset)
     if(!valid)
       CloseAudioStream(true);
   }
+
+  /* If user have selected to transcode subtitles we should not show it again here */
+  if (m_item.GetProperty("plexDidTranscode").asBoolean() && g_guiSettings.GetBool("plexmediaserver.transcodesubtitles"))
+    return;
 
   // open subtitle stream
   valid = false;

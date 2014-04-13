@@ -32,6 +32,9 @@
 #include "guilib/TextureManager.h"
 #include "cores/dvdplayer/DVDFileInfo.h"
 #include "cores/AudioEngine/AEFactory.h"
+#ifdef TARGET_RASPBERRY_PI
+#include "cores/AudioEngine/Utils/AEChannelInfo.h"
+#endif
 #include "cores/AudioEngine/Utils/AEUtil.h"
 #include "PlayListPlayer.h"
 #include "Autorun.h"
@@ -360,6 +363,8 @@
 #include "plex/GUI/GUIWindowPlexStartupHelper.h"
 #include "plex/PlexThemeMusicPlayer.h"
 #include "video/dialogs/GUIDialogVideoOSD.h"
+#include "plex/GUI/GUIPlexScreenSaverPhoto.h"
+#include "plex/Client/PlexTranscoderClient.h"
 /* END PLEX */
 
 #if defined(TARGET_ANDROID)
@@ -534,27 +539,11 @@ bool CApplication::OnEvent(XBMC_Event& newEvent)
       if (!g_application.m_bInitializing &&
           !g_advancedSettings.m_fullScreen)
       {
-        /* PLEX */
-#ifdef __PLEX__
-        int width = newEvent.resize.w;
-        int height = newEvent.resize.h;
-
-        // Maintain 16:9 AR.
-        height = width * 9 / 16;
-
-        g_Windowing.SetWindowResolution(width, height);
-        g_graphicsContext.SetVideoResolution(RES_WINDOW, true);
-        g_guiSettings.SetInt("window.width", width);
-        g_guiSettings.SetInt("window.height", height);
-        g_settings.Save();
-#else
         g_Windowing.SetWindowResolution(newEvent.resize.w, newEvent.resize.h);
         g_graphicsContext.SetVideoResolution(RES_WINDOW, true);
         g_guiSettings.SetInt("window.width", newEvent.resize.w);
         g_guiSettings.SetInt("window.height", newEvent.resize.h);
         g_settings.Save();
-#endif
-        /* END PLEX */
       }
       break;
     case XBMC_VIDEOMOVE:
@@ -1529,6 +1518,7 @@ bool CApplication::Initialize()
     g_windowManager.Add(new CGUIDialogPlexSubtitlePicker);
     g_windowManager.Add(new CGUIWindowPlexStartupHelper);
     g_windowManager.Add(new CGUIPlexPictureWindow);
+    g_windowManager.Add(new CGUIPlexScreenSaverPhoto);
     /* END PLEX */
 
     /* window id's 3000 - 3100 are reserved for python */
@@ -1576,12 +1566,25 @@ bool CApplication::Initialize()
         g_windowManager.ActivateWindow(g_SkinInfo->GetFirstWindow());
       }
 #else
+#ifndef TARGET_RASPBERRY_PI
       if (g_SkinInfo->HasSkinFile("PlexStartupHelper.xml") && !g_guiSettings.GetBool("system.firstrunwizard"))
       {
         g_windowManager.ActivateWindow(WINDOW_PLEX_STARTUP_HELPER);
         g_guiSettings.SetBool("system.firstrunwizard", true);
       }
       else
+#else
+
+      if (!g_guiSettings.GetBool("system.firstrunwizard"))
+      {
+        g_guiSettings.SetInt("audiooutput.mode", AUDIO_HDMI);
+        g_guiSettings.SetInt("audiooutput.channels", AE_CH_LAYOUT_2_0); // this is why sound is stereo FIXME
+        g_guiSettings.SetBool("audiooutput.ac3passthrough", false);
+        g_guiSettings.SetBool("audiooutput.dtspassthrough", false);
+        g_guiSettings.SetBool("system.firstrunwizard", true);
+      }
+
+#endif
         g_windowManager.ActivateWindow(g_SkinInfo->GetFirstWindow());
 #endif
     }
@@ -1746,8 +1749,10 @@ bool CApplication::StartWebServer()
       std::vector<std::pair<std::string, std::string> > txt;
       started = true;
       // publish web frontend and API services
+#ifndef __PLEX__
 #ifdef HAS_WEB_INTERFACE
       CZeroconf::GetInstance()->PublishService("servers.webserver", "_http._tcp", g_infoManager.GetLabel(SYSTEM_FRIENDLY_NAME), webPort, txt);
+#endif
 #endif
 #ifdef HAS_JSONRPC
       CZeroconf::GetInstance()->PublishService("servers.jsonrpc-http", "_xbmc-jsonrpc-h._tcp", g_infoManager.GetLabel(SYSTEM_FRIENDLY_NAME), webPort, txt);
@@ -1803,8 +1808,8 @@ bool CApplication::StartAirplayServer()
       {
         txt.push_back(std::make_pair("deviceid", "FF:FF:FF:FF:FF:F2"));
       }
-      txt.push_back(std::make_pair("features", "0x1000009FF"));
-      txt.push_back(std::make_pair("model", "AppleTV3,1"));
+      txt.push_back(std::make_pair("features", "0x77"));
+      txt.push_back(std::make_pair("model", "Xbmc,1"));
       txt.push_back(std::make_pair("srcvers", AIRPLAY_SERVER_VERSION_STR));
       CZeroconf::GetInstance()->PublishService("servers.airplay", "_airplay._tcp", g_infoManager.GetLabel(SYSTEM_FRIENDLY_NAME), listenPort, txt);
       ret = true;
@@ -2428,8 +2433,12 @@ float CApplication::GetDimScreenSaverLevel() const
   if (!m_bScreenSave || !m_screenSaver ||
       (m_screenSaver->ID() != "screensaver.xbmc.builtin.dim" &&
        m_screenSaver->ID() != "screensaver.xbmc.builtin.black" &&
+       m_screenSaver->ID() != "screensaver.xbmc.builtin.plexphotos" &&
        !m_screenSaver->ID().empty()))
     return 0;
+
+  if (m_screenSaver->ID() == "screensaver.xbmc.builtin.plexphotos")
+    return 0.042f;
 
   if (!m_screenSaver->GetSetting("level").IsEmpty())
     return 100.0f - (float)atof(m_screenSaver->GetSetting("level"));
@@ -2454,11 +2463,7 @@ bool CApplication::WaitFrame(unsigned int timeout)
 void CApplication::NewFrame()
 {
   /* PLEX */
-#if !defined(TARGET_RASPBERRY_PI)
-  // on RPi, with OMX player, there is a race condition, causing this function to deadlock on Graphic context
-  // when player is flipping page
   HideBusyIndicator();
-#endif
   /* END PLEX */
 
   // We just posted another frame. Keep track and notify.
@@ -3834,6 +3839,10 @@ void CApplication::Stop(int exitCode)
     StopServices();
     //Sleep(5000);
 
+    /* PLEX */
+    g_plexApplication.preShutdown();
+    /* END PLEX */
+
 #ifdef HAS_WEB_SERVER
   CWebServer::UnregisterRequestHandler(&m_httpImageHandler);
   CWebServer::UnregisterRequestHandler(&m_httpVfsHandler);
@@ -3849,6 +3858,10 @@ void CApplication::Stop(int exitCode)
   CWebServer::UnregisterRequestHandler(&m_httpWebinterfaceHandler);
 #endif
 #endif
+
+  /* PLEX */
+  g_plexApplication.Shutdown();
+  /* END PLEX */
 
     if (m_pPlayer)
     {
@@ -4261,6 +4274,19 @@ bool CApplication::PlayFile(const CFileItem& item_, bool bRestart)
       newItem.m_lStartOffset = item.m_lStartOffset;
       newItem.m_lEndOffset = item.m_lEndOffset;
 
+      // Matroska seeking check
+      if (CPlexTranscoderClient::getItemTranscodeMode(item) == CPlexTranscoderClient::PLEX_TRANSCODE_MODE_MKV)
+      {
+        if (item.HasProperty("viewOffsetSeek"))
+        {
+          // for Matroska seeking, redefine viewOffset from seeeking value and update item offset
+          int64_t offsetSeek = item.GetProperty("viewOffsetSeek").asInteger();
+
+          newItem.SetProperty("viewOffset", offsetSeek);
+          newItem.m_lStartOffset = item.m_lStartOffset = ((offsetSeek / 10) - newItem.m_lEndOffset) * 0.75;
+        }
+      }
+
       item = newItem;
 
       if (!m_itemCurrentFile->IsStack())
@@ -4462,7 +4488,10 @@ bool CApplication::PlayFile(const CFileItem& item_, bool bRestart)
   // tell system we are starting a file
   m_bPlaybackStarting = true;
 
-
+  // for playing a new item, previous playing item's callback may already
+  // pushed some delay message into the threadmessage list, they are not
+  // expected be processed after or during the new item playback starting.
+  // so we clean up previous playing item's playback callback delay messages here.
   int previousMsgsIgnoredByNewPlaying[] = {
         GUI_MSG_PLAYBACK_STARTED,
         GUI_MSG_PLAYBACK_ENDED,
@@ -4586,8 +4615,7 @@ bool CApplication::PlayFile(const CFileItem& item_, bool bRestart)
   // If we're supposed to activate the visualizer when playing audio, do so now.
   if (IsPlayingAudio() &&
       g_advancedSettings.m_bVisualizerOnPlay &&
-      !g_playlistPlayer.HasPlayedFirstFile() &&
-      !g_playlistPlayer.QueuedFirstFile())
+      !g_playlistPlayer.HasPlayedFirstFile())
   {
     ActivateVisualizer();
   }
@@ -4741,6 +4769,17 @@ void CApplication::OnPlayBackSeek(int iTime, int seekOffset)
   g_infoManager.SetDisplayAfterSeek(2500, seekOffset/1000);
 
   /* PLEX */
+  // define here viewOffsetSeek for Matroska transcoding seek & restart media
+  if (CurrentFileItemPtr())
+  {
+    if (CPlexTranscoderClient::getItemTranscodeMode(*CurrentFileItemPtr()) == CPlexTranscoderClient::PLEX_TRANSCODE_MODE_MKV)
+    {
+      CurrentFileItemPtr()->SetProperty("viewOffsetSeek",iTime);
+      CApplicationMessenger::Get().MediaRestart(false);
+    }
+  }
+  
+
   UpdateFileState("", true);
   /* END PLEX */
 }
@@ -5035,6 +5074,9 @@ bool CApplication::WakeUpScreenSaver(bool bPowerOffKeyPressed /* = false */)
       if (g_settings.GetMasterProfile().getLockMode() != LOCK_MODE_EVERYONE &&
           (g_settings.UsingLoginScreen() || g_guiSettings.GetBool("masterlock.startuplock")) &&
           g_settings.GetCurrentProfile().getLockMode() != LOCK_MODE_EVERYONE &&
+          /* PLEX */
+          m_screenSaver->ID() != "screensaver.xbmc.builtin.plexphotos" &&
+          /* END PLEX */
           m_screenSaver->ID() != "screensaver.xbmc.builtin.dim" && m_screenSaver->ID() != "screensaver.xbmc.builtin.black" && !m_screenSaver->ID().empty() && m_screenSaver->ID() != "visualization")
       {
         m_iScreenSaveLock = 2;
@@ -5060,6 +5102,10 @@ bool CApplication::WakeUpScreenSaver(bool bPowerOffKeyPressed /* = false */)
       // we can just continue as usual from vis mode
       return false;
     }
+    /* PLEX */
+    else if (m_screenSaver->ID() == "screensaver.xbmc.builtin.plexphotos")
+      return true;
+    /* END PLEX */
     else if (m_screenSaver->ID() == "screensaver.xbmc.builtin.dim" || m_screenSaver->ID() == "screensaver.xbmc.builtin.black" || m_screenSaver->ID().empty())
       return true;
     else if (!m_screenSaver->ID().IsEmpty())
@@ -5176,6 +5222,10 @@ void CApplication::ActivateScreenSaver(bool forceType /*= false */)
     return;
   else if (m_screenSaver->ID() == "screensaver.xbmc.builtin.black")
     return;
+  /* PLEX */
+  else if (m_screenSaver->ID() == "screensaver.xbmc.builtin.plexphotos")
+    return;
+  /* END PLEX */
   else if (!m_screenSaver->ID().IsEmpty())
     g_windowManager.ActivateWindow(WINDOW_SCREENSAVER);
 }
@@ -5417,11 +5467,9 @@ bool CApplication::OnMessage(CGUIMessage& message)
         if (CLastFmManager::GetInstance()->IsRadioEnabled())
           CLastFmManager::GetInstance()->StopRadio();
 
-        if (!m_pPlayer->IsPlaying())
-        {
-          delete m_pPlayer;
-          m_pPlayer = 0;
-        }
+        delete m_pPlayer;
+        m_pPlayer = 0;
+
         // Reset playspeed
         m_iPlaySpeed = 1;
       }
@@ -5754,7 +5802,7 @@ void CApplication::Restart(bool bSamePosition)
   /* END PLEX */
 
   // do we want to return to the current position in the file
-  if (false == bSamePosition)
+  if ((false == bSamePosition) && (CPlexTranscoderClient::getItemTranscodeMode(*m_itemCurrentFile) != CPlexTranscoderClient::PLEX_TRANSCODE_MODE_MKV))
   {
     // no, then just reopen the file and start at the beginning
     PlayFile(*m_itemCurrentFile, true);
@@ -6384,24 +6432,16 @@ void CApplication::UpdateFileState(const string& aState, bool force)
     return;
 
   // Compute the state if not passed on.
-  CPlexTimelineManager::MediaState state;
-  if (aState == "paused")
-    state = CPlexTimelineManager::MEDIA_STATE_PAUSED;
-  else if (aState == "playing")
-    state = CPlexTimelineManager::MEDIA_STATE_PLAYING;
-  else if (aState == "buffering")
-    state = CPlexTimelineManager::MEDIA_STATE_BUFFERING;
-  else if (aState == "stopped" )
-    state = CPlexTimelineManager::MEDIA_STATE_STOPPED;
-  else if (aState.empty())
-    state = IsBuffering() ? CPlexTimelineManager::MEDIA_STATE_BUFFERING : IsPaused() ? CPlexTimelineManager::MEDIA_STATE_PAUSED : CPlexTimelineManager::MEDIA_STATE_PLAYING;
+  ePlexMediaState state;
+  if (!aState.empty())
+    state = PlexUtils::GetMediaStateFromString(aState);
   else
-    return;
+    state = IsBuffering() ? PLEX_MEDIA_STATE_BUFFERING : IsPaused() ? PLEX_MEDIA_STATE_PAUSED : PLEX_MEDIA_STATE_PLAYING;
 
   if (!m_itemCurrentFile->HasProperty("duration"))
     m_itemCurrentFile->SetProperty("duration", GetTotalTime());
 
-  if (state == CPlexTimelineManager::MEDIA_STATE_STOPPED || IsPlayingVideo() || IsPlayingAudio())
+  if (state == PLEX_MEDIA_STATE_STOPPED || IsPlayingVideo() || IsPlayingAudio())
   {
     if (g_plexApplication.timelineManager)
       g_plexApplication.timelineManager->ReportProgress(m_itemCurrentFile, state, GetTime() * 1000, force);

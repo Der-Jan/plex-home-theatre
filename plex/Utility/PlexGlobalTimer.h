@@ -5,11 +5,16 @@
 #include "threads/CriticalSection.h"
 #include "JobManager.h"
 
+#include "StdString.h"
+
+#include <boost/shared_ptr.hpp>
+
 class IPlexGlobalTimeout
 {
   public:
     virtual ~IPlexGlobalTimeout() {}
     virtual void OnTimeout() = 0;
+    virtual CStdString TimerName() const { return "unnamed"; }
 };
 
 typedef std::pair<int64_t, IPlexGlobalTimeout*> timeoutPair;
@@ -36,16 +41,20 @@ class CPlexGlobalTimer : public CThread
     void SetTimeout(int64_t msec, IPlexGlobalTimeout* callback);
     void RemoveTimeout(IPlexGlobalTimeout* callback);
     void RestartTimeout(int64_t msec, IPlexGlobalTimeout* callback);
+    void RemoveAllTimeoutsByName(const CStdString& name);
 
     void StopAllTimers();
   private:
     void Process();
     void SetTimer();
+    void DumpDebug();
 
     CCriticalSection m_timerLock;
     std::vector<timeoutPair> m_timeouts;
     CEvent m_timerEvent;
     bool m_running;
 };
+
+typedef boost::shared_ptr<CPlexGlobalTimer> CPlexGlobalTimerPtr;
 
 #endif // PLEXGLOBALTIMER_H

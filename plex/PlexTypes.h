@@ -5,6 +5,10 @@
 #include <map>
 
 #include <boost/shared_ptr.hpp>
+#include <boost/unordered_map.hpp>
+#include <boost/algorithm/string.hpp>
+#include "Variant.h"
+#include "StdString.h"
 
 enum EPlexDirectoryType
 {
@@ -55,6 +59,21 @@ enum EPlexDirectoryType
   PLEX_DIR_TYPE_HOME_MOVIES
 };
 
+enum ePlexMediaType {
+  PLEX_MEDIA_TYPE_MUSIC,
+  PLEX_MEDIA_TYPE_PHOTO,
+  PLEX_MEDIA_TYPE_VIDEO,
+  PLEX_MEDIA_TYPE_UNKNOWN
+};
+
+enum ePlexMediaState {
+  PLEX_MEDIA_STATE_STOPPED,
+  PLEX_MEDIA_STATE_PLAYING,
+  PLEX_MEDIA_STATE_BUFFERING,
+  PLEX_MEDIA_STATE_PAUSED
+};
+
+
 // Windows.
 #define WINDOW_NOW_PLAYING                10050
 #define WINDOW_PLEX_SEARCH                10051
@@ -73,6 +92,7 @@ enum EPlexDirectoryType
 #define WINDOW_DIALOG_FILTER_SORT           10202
 #define WINDOW_DIALOG_PLEX_SUBTITLE_PICKER  10204
 #define WINDOW_DIALOG_PLEX_AUDIO_PICKER     10205
+#define WINDOW_DIALOG_PLEX_SS_PHOTOS        10206
 
 // Sent when the set of remote sources has changed
 #define GUI_MSG_UPDATE_REMOTE_SOURCES GUI_MSG_USER + 40
@@ -130,6 +150,8 @@ class CMusicThumbLoader;
 #define SYSTEM_SELECTED_PLEX_MEDIA_SERVER      5002
 #define SYSTEM_UPDATE_IS_AVAILABLE  5003
 #define SYSTEM_NO_PLEX_SERVERS      5004
+#define SYSTEM_ISRASPLEX            5005
+#define SYSTEM_ISOPENELEC           5006
 #define SLIDESHOW_SHOW_DESCRIPTION  990
 
 #define LISTITEM_STAR_DIFFUSE       (LISTITEM_START + 110)
@@ -191,5 +213,8 @@ typedef std::map<std::string, CPlexServerPtr> PlexServerMap;
 typedef std::pair<std::string, CPlexServerPtr> PlexServerPair;
 
 #define PLEX_DEFAULT_PAGE_SIZE 50
+
+/* Property map definition */
+typedef boost::unordered_map<CStdString, CVariant> PropertyMap;
 
 #endif

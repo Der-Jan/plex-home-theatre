@@ -6,6 +6,8 @@
 #include <boost/assign.hpp>
 #include <boost/foreach.hpp>
 #include <string>
+#include "Mime.h"
+#include "URIUtils.h"
 
 #include "PlexApplication.h"
 #include "GUIInfoManager.h"
@@ -32,6 +34,8 @@ vector<stringPair> CPlexFile::GetHeaderList()
   hdrs.push_back(stringPair("X-Plex-Device", "RaspberryPi"));
 #elif defined(TARGET_DARWIN_IOS)
   hdrs.push_back(stringPair("X-Plex-Device", "AppleTV"));
+#elif defined(OPENELEC)
+  hdrs.push_back(strinPair("X-Plex-Device", "OpenELEC"));
 #else
   hdrs.push_back(stringPair("X-Plex-Device", "PC"));
 #endif
@@ -68,7 +72,6 @@ CPlexFile::BuildHTTPURL(CURL& url)
 {
   CURL newUrl;
   CPlexServerPtr server;
-  CStdString key;
 
   /* allow passthrough */
   if (url.GetProtocol() != "plexserver")
@@ -77,21 +80,12 @@ CPlexFile::BuildHTTPURL(CURL& url)
   if (!g_plexApplication.serverManager)
     return false;
 
-  if (PlexUtils::IsValidIP(url.GetHostName()))
-  {
-    server = g_plexApplication.serverManager->FindByHostAndPort(url.GetHostName(), url.GetPort());
-    key = url.GetHostName() + ":" + boost::lexical_cast<CStdString>(url.GetPort());
-  }
-  else
-  {
-    key = url.GetHostName();
-    server = g_plexApplication.serverManager->FindByUUID(key);
-  }
+  server = g_plexApplication.serverManager->FindByUUID(url.GetHostName());
 
   if (!server)
   {
     /* Ouch, this should not happen! */
-    CLog::Log(LOGWARNING, "CPlexFile::BuildHTTPURL tried to lookup server %s but it was not found!", key.c_str());
+    CLog::Log(LOGWARNING, "CPlexFile::BuildHTTPURL tried to lookup server %s but it was not found!", url.GetHostName().c_str());
     return false;
   }
 
@@ -136,9 +130,20 @@ int
 CPlexFile::Stat(const CURL &url, struct __stat64 *buffer)
 {
   CURL newUrl(url);
+
+  // ImageLib makes stupid Stat() calls just to figure out
+  // if this is a directory or not. Let's just shortcut that
+  // and tell it everything it requests from photo/:/transcode
+  // is a file
+  if (newUrl.GetFileName() == "photo/:/transcode")
+  {
+    buffer->st_mode = _S_IFREG;
+    return 0;
+  }
+
   if (BuildHTTPURL(newUrl))
     return CCurlFile::Stat(newUrl, buffer);
-  return false;
+  return -1;
 }
 
 bool
@@ -148,4 +153,33 @@ CPlexFile::Exists(const CURL &url)
   if (BuildHTTPURL(newUrl))
     return CCurlFile::Exists(newUrl);
   return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString CPlexFile::GetMimeType(const CURL& url)
+{
+  /* we only handle plexserver:// stuff here */
+  if (url.GetProtocol() != "plexserver")
+    return "";
+
+  CStdString path = url.GetFileName();
+
+  if (boost::starts_with(path, "/video"))
+    return "video/unknown";
+  if (boost::starts_with(path, "/music"))
+    return "audio/uknown";
+  if (boost::starts_with(path, "/photo"))
+    return "image/unknown";
+
+  CStdString extension = URIUtils::GetExtension(path);
+  return CMime::GetMimeType(extension);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+int CPlexFile::IoControl(EIoControl request, void* param)
+{
+  if ( (request == IOCTRL_SEEK_POSSIBLE) && (boost::starts_with(m_url, ":/transcode")) )
+    return 1;
+  else
+    return CCurlFile::IoControl(request, param);
 }

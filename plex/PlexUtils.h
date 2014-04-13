@@ -5,6 +5,10 @@
 #include "FileItem.h"
 #include "utils/XBMCTinyXML.h"
 
+#if defined(HAVE_EXECINFO_H)
+#include <execinfo.h>
+#endif
+
 namespace PlexUtils
 {
   std::string GetHostName();
@@ -42,7 +46,25 @@ namespace PlexUtils
   CStdString GetSHA1SumFromURL(const CURL &url);
 
   CStdString GetXMLString(const CXBMCTinyXML &document);
+
+  bool MakeWakeupPipe(SOCKET *pipe);
+
+  void LogStackTrace(char *FuncName);
+
+  ePlexMediaType GetMediaTypeFromItem(CFileItemPtr item);
+  ePlexMediaType GetMediaTypeFromItem(const CFileItem& item);
+  std::string GetMediaTypeString(ePlexMediaType type);
+  ePlexMediaType GetMediaTypeFromString(const std::string &typeString);
+  ePlexMediaState GetMediaStateFromString(const std::string &statestring);
+  std::string GetMediaStateString(ePlexMediaState state);
+
+  unsigned long GetFastHash(std::string Data);
+  bool IsPlayingPlaylist();
 }
+
+#if defined(HAVE_EXECINFO_H)
+#define LOG_STACKTRACE  PlexUtils::LogStackTrace((char*)__PRETTY_FUNCTION__);
+#endif
 
 #ifdef _WIN32
 

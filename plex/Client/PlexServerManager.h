@@ -26,6 +26,10 @@ public:
 
   CPlexServerManager();
 
+  // This constructor is mainly used by tests, it inserts the server
+  // into the server map.
+  CPlexServerManager(const CPlexServerPtr& server);
+
   CPlexServerPtr GetBestServer() const
   {
     CSingleLock lk(m_serverManagerLock);
@@ -36,15 +40,15 @@ public:
   void ClearBestServer();
 
   CPlexServerPtr FindByUUID(const CStdString &uuid);
-  CPlexServerPtr FindByHostAndPort(const CStdString &host, int port);
   CPlexServerPtr FindFromItem(CFileItemPtr item);
+  CPlexServerPtr FindFromItem(const CFileItem& item);
 
   PlexServerList GetAllServers(CPlexServerOwnedModifier modifier = SERVER_ALL) const;
 
   void UpdateFromConnectionType(PlexServerList servers, int connectionType);
   void UpdateFromDiscovery(CPlexServerPtr server);
   void MarkServersAsRefreshing();
-  void MergeServer(CPlexServerPtr server);
+  CPlexServerPtr MergeServer(CPlexServerPtr server);
   void ServerRefreshComplete(int connectionType);
   void UpdateReachability(bool force = false);
 

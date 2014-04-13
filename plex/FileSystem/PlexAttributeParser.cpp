@@ -93,18 +93,26 @@ void CPlexAttributeParserKey::Process(const CURL& url, const CStdString &key, co
   item->SetProperty("unprocessed_" + key, value);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void CPlexAttributeParserMediaUrl::Process(const CURL &url, const CStdString &key, const CStdString &value, CFileItem *item)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+CStdString CPlexAttributeParserMediaUrl::GetImageURL(const CURL &url, const CStdString &source, int height, int width)
 {
   CURL mediaUrl(url);
   CURL imageURL;
-  
-  /* reset the options to not bust cache stuff */
+  CUrlOptions options;
+  CPlexServerPtr server;
+
   mediaUrl.SetOptions("");
 
-  if ((mediaUrl.GetHostName() == "myplex" || mediaUrl.GetHostName() == "node") && g_plexApplication.serverManager)
+  if (g_plexApplication.serverManager)
+    server = g_plexApplication.serverManager->FindByUUID(mediaUrl.GetHostName());
+
+  if ((mediaUrl.GetHostName() == "myplex" || mediaUrl.GetHostName() == "node") ||
+      (server && (server->GetSynced() || !server->GetServerClass().empty())))
   {
-    CPlexServerPtr bestServer = g_plexApplication.serverManager->GetBestServer();
+    CPlexServerPtr bestServer;
+    if (g_plexApplication.serverManager)
+      bestServer = g_plexApplication.serverManager->GetBestServer();
+
     if (bestServer)
       mediaUrl.SetHostName(bestServer->GetUUID());
     else
@@ -112,117 +120,143 @@ void CPlexAttributeParserMediaUrl::Process(const CURL &url, const CStdString &ke
       mediaUrl.SetHostName("myplex");
   }
 
-  if (boost::starts_with(value, "http://") || boost::starts_with(value, "https://"))
+  if (boost::starts_with(source, "http://") || boost::starts_with(source, "https://"))
   {
-    imageURL = CURL(value);
+    imageURL = CURL(source);
   }
   else
   {
     imageURL.SetProtocol("http");
     imageURL.SetHostName("127.0.0.1");
     imageURL.SetPort(32400);
-    if (boost::starts_with(value, "/"))
-      imageURL.SetFileName(value.substr(1, std::string::npos));
-    else
-      imageURL.SetFileName(value);
-  }
 
-  CStdString width="0", height="0";
-  CStdString propertyName = key;
-  if (key == "thumb" || key == "poster")
-  {
-    width = height = "720";
-    if (key == "poster")
+    // Now check if we have a local connection that might override the port
+    // this is especially true for secondary servers
+    if (server)
     {
-      Process(url, "bigPoster", value, item);
+      CPlexConnectionPtr localConn = server->GetLocalConnection();
+      if (localConn)
+        imageURL.SetPort(localConn->GetAddress().GetPort());
     }
-  }
-  else if (key == "grandparentThumb")
-  {
-    width = height = "720";
-    propertyName = PLEX_ART_TVSHOW_THUMB;
-  }
-  else if (key == "banner")
-  {
-    width = "800";
-    height = "200";
-  }
-  else if (key == "art")
-  {
-    width = "1920";
-    height = "1080";
-    propertyName = PLEX_ART_FANART;
-  }
-  else if (key == "picture")
-  {
-    width = "1920";
-    height = "1080";
+
+    if (boost::starts_with(source, "/"))
+      imageURL.SetFileName(source.substr(1, std::string::npos));
+    else
+      imageURL.SetFileName(source);
   }
 
-  CUrlOptions Options;
-  Options.AddOption("width", width);
-  Options.AddOption("height", height);
-  Options.AddOption("url", imageURL.Get());
+  CStdString swidth = "320", sheight = "320";
+
+  try
+  {
+    swidth = boost::lexical_cast<CStdString>(width);
+    sheight = boost::lexical_cast<CStdString>(height);
+  }
+  catch (boost::bad_lexical_cast)
+  {
+    CLog::Log(LOGWARNING, "CPlexAttributeParser::GetImageURL Could not convert width or height to a string");
+  }
+
+  options.AddOption("width", swidth);
+  options.AddOption("height", sheight);
+  options.AddOption("url", imageURL.Get());
   if (g_advancedSettings.m_bForceJpegImageFormat)
-    Options.AddOption("format", "jpg");
+    options.AddOption("format", "jpg");
 
-  mediaUrl.AddOptions(Options);
+  mediaUrl.AddOptions(options);
 
   mediaUrl.SetFileName("photo/:/transcode");
 
-  //CLog::Log(LOGDEBUG, "CPlexAttributeParserMediaUrl::Process setting %s = %s for item %s", propertyName.c_str(), mediaUrl.Get().c_str(), item.GetLabel().c_str());
-  item->SetArt(propertyName, mediaUrl.Get());
+  return mediaUrl.Get();
+}
+
+#define SMALL_SIZE 320
+#define MEDIUM_SIZE 720
+#define LARGE_SIZE 2048
+
+////////////////////////////////////////////////////////////////////////////////
+void CPlexAttributeParserMediaUrl::Process(const CURL &url, const CStdString &key, const CStdString &value, CFileItem *item)
+{
+  if (key == "thumb")
+  {
+    item->SetArt("smallThumb", GetImageURL(url, value, SMALL_SIZE, SMALL_SIZE));
+    item->SetArt("thumb", GetImageURL(url, value, MEDIUM_SIZE, MEDIUM_SIZE));
+    item->SetArt("bigThumb", GetImageURL(url, value, LARGE_SIZE, LARGE_SIZE));
+  }
+  else if (key == "poster")
+  {
+    item->SetArt("smallPoster", GetImageURL(url, value, SMALL_SIZE, SMALL_SIZE));
+    item->SetArt("poster", GetImageURL(url, value, MEDIUM_SIZE, MEDIUM_SIZE));
+    item->SetArt("bigPoster", GetImageURL(url, value, LARGE_SIZE, LARGE_SIZE));
+  }
+  else if (key == "grandparentThumb")
+  {
+    item->SetArt("smallGrandparentThumb", GetImageURL(url, value, SMALL_SIZE, SMALL_SIZE));
+    item->SetArt("grandparentThumb", GetImageURL(url, value, MEDIUM_SIZE, MEDIUM_SIZE));
+    item->SetArt(PLEX_ART_TVSHOW_THUMB, GetImageURL(url, value, MEDIUM_SIZE, MEDIUM_SIZE));
+    item->SetArt("bigGrandparentThumb", GetImageURL(url, value, LARGE_SIZE, LARGE_SIZE));
+  }
+  else if (key == "banner")
+    item->SetArt("banner", GetImageURL(url, value, 200, 800));
+  else if (key == "art")
+    item->SetArt(PLEX_ART_FANART, GetImageURL(url, value, LARGE_SIZE, LARGE_SIZE));
+  else if (key == "picture")
+    item->SetArt("picture", GetImageURL(url, value, LARGE_SIZE, LARGE_SIZE));
+  else
+    item->SetArt(key, GetImageURL(url, value, 320, 320));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 void CPlexAttributeParserMediaFlag::Process(const CURL &url, const CStdString &key, const CStdString &value, CFileItem *item)
 {
-  static std::map<std::string,std::string> FlagsMap;
+  static std::map<std::string, std::string> FlagsMap;
+  static CCriticalSection FlagsMapSection;
+  CSingleLock Lock(FlagsMapSection);
 
-    // Look if we found a flag in the cache
-    std::map<std::string,std::string>::const_iterator got = FlagsMap.find (key+"|"+value);
-    if (( got != FlagsMap.end()) && true)
+  std::map<std::string, std::string>::const_iterator got = FlagsMap.find(key + "|" + value);
+  if ((got != FlagsMap.end()) && true)
+  {
+    item->SetArt("mediaTag::" + key, got->second);
+    item->SetProperty("mediaTag-" + key, value);
+    //CLog::Log(LOGDEBUG, "CPlexAttributeParserMediaFlag::Process MEDIATAG (CACHED): mediaTag::%s = %s | mediaTag-%s = %s", key.c_str(), got->second.c_str(), key.c_str(), value.c_str());
+  }
+  else
+  {
+    CURL mediaTagUrl;
+
+    mediaTagUrl.SetProtocol("http");
+    mediaTagUrl.SetHostName("127.0.0.1");
+    mediaTagUrl.SetPort(32400);
+
+    if (!item->HasProperty("mediaTagPrefix"))
     {
-        item->SetArt("mediaTag::" + key,got->second);
-        item->SetProperty("mediaTag-" + key, value);
+      CLog::Log(LOGWARNING, "CPlexAttributeParserMediaFlag::Process got a mediaflag on %s but we don't have any mediaTagPrefix", url.Get().c_str());
+      return;
     }
+
+    CStdString mediaTagPrefix = item->GetProperty("mediaTagPrefix").asString();
+    CStdString mediaTagVersion = item->GetProperty("mediaTagVersion").asString();
+
+    CStdString flagUrl = mediaTagPrefix;
+
+    flagUrl = PlexUtils::AppendPathToURL(flagUrl, key);
+    flagUrl = PlexUtils::AppendPathToURL(flagUrl, CURL::Encode(value));
+
+    if (boost::starts_with(flagUrl, "/"))
+      mediaTagUrl.SetFileName(flagUrl.substr(1, std::string::npos));
     else
-    {
-      CURL mediaTagUrl;
+      mediaTagUrl.SetFileName(flagUrl);
 
-      mediaTagUrl.SetProtocol("http");
-      mediaTagUrl.SetHostName("127.0.0.1");
-      mediaTagUrl.SetPort(32400);
+    if (!mediaTagVersion.empty())
+      mediaTagUrl.SetOption("t", mediaTagVersion);
 
-      if (!item->HasProperty("mediaTagPrefix"))
-      {
-        CLog::Log(LOGWARNING, "CPlexAttributeParserMediaFlag::Process got a mediaflag on %s but we don't have any mediaTagPrefix", url.Get().c_str());
-        return;
-      }
+    //CLog::Log(LOGDEBUG, "CPlexAttributeParserMediaFlag::Process MEDIATAG: mediaTag::%s = %s | mediaTag-%s = %s", key.c_str(), mediaTagUrl.Get().c_str(), key.c_str(), value.c_str());
+    CPlexAttributeParserMediaUrl::Process(url, "mediaTag::" + key, mediaTagUrl.Get(), item);
 
-      CStdString mediaTagPrefix = item->GetProperty("mediaTagPrefix").asString();
-      CStdString mediaTagVersion = item->GetProperty("mediaTagVersion").asString();
-
-      CStdString flagUrl = mediaTagPrefix;
-
-      flagUrl = PlexUtils::AppendPathToURL(flagUrl, key);
-      flagUrl = PlexUtils::AppendPathToURL(flagUrl, CURL::Encode(value));
-
-      if (boost::starts_with(flagUrl, "/"))
-        mediaTagUrl.SetFileName(flagUrl.substr(1, std::string::npos));
-      else
-        mediaTagUrl.SetFileName(flagUrl);
-
-      if (!mediaTagVersion.empty())
-        mediaTagUrl.SetOption("t", mediaTagVersion);
-
-      //CLog::Log(LOGDEBUG, "CPlexAttributeParserMediaFlag::Process MEDIATAG: mediaTag::%s = %s | mediaTag-%s = %s", key.c_str(), mediaTagUrl.Get().c_str(), key.c_str(), value.c_str());
-      CPlexAttributeParserMediaUrl::Process(url, "mediaTag::" + key, mediaTagUrl.Get(), item);
-
-      /* also store the raw value */
-      item->SetProperty("mediaTag-" + key, value);
-      FlagsMap[key+"|"+value] = item->GetArt("mediaTag::"+ key);
-    }
+    /* also store the raw value */
+    item->SetProperty("mediaTag-" + key, value);
+    FlagsMap[key + "|" + value] = item->GetArt("mediaTag::" + key);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

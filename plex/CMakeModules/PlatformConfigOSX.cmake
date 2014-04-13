@@ -48,7 +48,7 @@ if(DEFINED XCODE_VERSION)
 endif()
 
 ######################### Compiler CFLAGS
-set(EXTRA_CFLAGS "-mmacosx-version-min=10.6 -isysroot ${OSX_SDK_PATH}")
+set(EXTRA_CFLAGS "-Qunused-arguments -mmacosx-version-min=10.6 -isysroot ${OSX_SDK_PATH}")
 
 ######################### CHECK LIBRARIES / FRAMEWORKS
 #### Frameworks for MacOSX
@@ -94,7 +94,6 @@ set(external_libs
   GLEW
   vorbis
   vorbisenc
-  gnutls
 )
 
 set(ffmpeg_libs
@@ -110,7 +109,7 @@ set(ffmpeg_libs
 )
 
 if(ENABLE_PYTHON)
-  list(APPEND external_libs python2.6)
+  plex_find_package(Python 1 1)
 endif()
 
 set(non_link_libs

@@ -16,31 +16,28 @@
 
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
-
 #include <limits.h>
+
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlexNavigationHelper::CacheUrl(const std::string& url, bool& cancel, bool closeDialog)
 {
+  m_cacheEvent.Reset();
 
   int id = CJobManager::GetInstance().AddJob(new CPlexDirectoryFetchJob(CURL(url)), this, CJob::PRIORITY_HIGH);
 
-  #ifdef TARGET_RASPBERRY_PI
-  if (!m_cacheEvent.WaitMSec(UINT_MAX)) // obvious sentinal value
-  #else
+  CGUIDialogBusy *busy = (CGUIDialogBusy*)g_windowManager.GetWindow(WINDOW_DIALOG_BUSY);
+
   if (!m_cacheEvent.WaitMSec(300))
-  #endif
   {
-    CGUIDialogBusy *busy = (CGUIDialogBusy*)g_windowManager.GetWindow(WINDOW_DIALOG_BUSY);
     cancel = false;
 
     if (busy)
     {
-      m_cacheEvent.Reset();
-
-
       if (!busy->IsActive())
         busy->Show();
+
       while (!m_cacheEvent.WaitMSec(10))
       {
         if (busy->IsCanceled())
@@ -58,12 +55,15 @@ bool CPlexNavigationHelper::CacheUrl(const std::string& url, bool& cancel, bool 
         busy->Close();
     }
   }
+  else
+    if (closeDialog)
+      busy->Close();
 
   return m_cacheSuccess;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &parentUrl, int windowId)
+CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &parentUrl, int windowId, bool swap)
 {
   CStdString empty;
 
@@ -99,8 +99,10 @@ CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &
   if (item->m_bIsFolder && (windowId == WINDOW_SHARED_CONTENT || windowId == WINDOW_HOME))
   {
     CURL u = CGUIPlexMediaWindow::GetRealDirectoryUrl(originalUrl);
+#if 0
     u.SetProtocolOption("containerStart", "0");
     u.SetProtocolOption("containerSize", boost::lexical_cast<std::string>(PLEX_DEFAULT_PAGE_SIZE));
+#endif
     cacheUrl = u.Get();
   }
 
@@ -125,7 +127,7 @@ CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &
     args.push_back(originalUrl);
     args.push_back("return");
 
-    CApplicationMessenger::Get().ActivateWindow(window, args, false);
+    CApplicationMessenger::Get().ActivateWindow(window, args, swap);
     return empty;
   }
 
@@ -141,7 +143,7 @@ CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &
     args.push_back("return");
     args.push_back(parentUrl.Get());
 
-    CApplicationMessenger::Get().ActivateWindow(WINDOW_PLEX_PREPLAY_VIDEO, args, false);
+    CApplicationMessenger::Get().ActivateWindow(WINDOW_PLEX_PREPLAY_VIDEO, args, swap);
     return empty;
   }
 
@@ -180,7 +182,7 @@ CStdString CPlexNavigationHelper::navigateToItem(CFileItemPtr item, const CURL &
     CLog::Log(LOGDEBUG, "CPlexNavigationHelper::navigateToItem navigating to %s (%s)", originalUrl.c_str(), item->GetLabel().c_str());
     std::vector<CStdString> args;
     args.push_back(originalUrl);
-    CApplicationMessenger::Get().ActivateWindow(window, args, false);
+    CApplicationMessenger::Get().ActivateWindow(window, args, swap);
   }
   else
     return originalUrl;
@@ -199,6 +201,7 @@ void CPlexNavigationHelper::OnJobComplete(unsigned int jobID, bool success, CJob
     g_directoryCache.SetDirectory(fjob->m_url.Get(), fjob->m_items, XFILE::DIR_CACHE_ALWAYS);
 
   m_cacheSuccess = success;
+  CLog::Log(LOGDEBUG,"CPlexNavigationHelper::OnJobComplete setting event");
   m_cacheEvent.Set();
 
 }

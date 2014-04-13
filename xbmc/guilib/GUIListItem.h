@@ -40,15 +40,7 @@ class CArchive;
 class CVariant;
 
 /* PLEX */
-struct icompare
-{
-  bool operator()(const CStdString &s1, const CStdString &s2) const
-  {
-    return s1.CompareNoCase(s2) < 0;
-  }
-};
-
-typedef std::map<CStdString, CVariant, icompare> PropertyMap;
+#include "PlexTypes.h"
 /* END PLEX */
 
 /*!
@@ -167,10 +159,17 @@ public:
 
   bool m_bIsFolder;     ///< is item a folder or a file
 
+#ifdef __PLEX__
   inline void SetProperty(const CStdString &strKey, const CVariant &value)
   {
-    m_mapProperties[strKey] = value;
+    CStdString _key(strKey);
+    _key.ToLower();
+
+    m_mapProperties[_key] = value;
   }
+#else
+  void SetProperty(const CStdString &strKey, const CVariant &value);
+#endif
 
   void IncrementProperty(const CStdString &strKey, int nVal);
   void IncrementProperty(const CStdString &strKey, double dVal);
@@ -187,34 +186,48 @@ public:
   void Archive(CArchive& ar);
   void Serialize(CVariant& value);
 
+#ifdef __PLEX__
   inline bool HasProperty(const CStdString &strKey) const
   {
-    PropertyMap::const_iterator iter = m_mapProperties.find(strKey);
+    CStdString _key(strKey);
+    _key.ToLower();
+
+    PropertyMap::const_iterator iter = m_mapProperties.find(_key);
     if (iter == m_mapProperties.end())
       return false;
 
     return true;
   }
+#else
+  bool HasProperty(const CStdString &strKey) const;
+#endif
 
   bool       HasProperties() const { return m_mapProperties.size() > 0; };
   void       ClearProperty(const CStdString &strKey);
 
+#ifdef __PLEX__
   inline CVariant GetProperty(const CStdString &strKey) const
   {
-    PropertyMap::const_iterator iter = m_mapProperties.find(strKey);
+    CStdString _key(strKey);
+    _key.ToLower();
+
+    PropertyMap::const_iterator iter = m_mapProperties.find(_key);
     if (iter == m_mapProperties.end())
       return CVariant(CVariant::VariantTypeNull);
 
     return iter->second;
   }
-  /* PLEX */
+#else
+  CVariant GetProperty(const CStdString &strKey) const;
+#endif
+
   int GetOverlayImageID() const { return m_overlayIcon; }
 
   void SetArt(const std::string &type, int index, const std::string &url);
   std::string GetArt(const std::string &type, int index) const;
   bool HasArt(const std::string &type, int index) const;
-
   void RemoveArt(const std::string &type);
+  const PropertyMap& GetAllProperties() const { return m_mapProperties; }
   /* END PLEX */
 
 protected:
@@ -226,16 +239,17 @@ protected:
   CGUIListItemLayout *m_focusedLayout;
   bool m_bSelected;     // item is selected or not
 
-  /* PLEX */
-public:
+#ifndef __PLEX__
+  struct icompare
+  {
+    bool operator()(const CStdString &s1, const CStdString &s2) const;
+  };
+
+  typedef std::map<CStdString, CVariant, icompare> PropertyMap;
+#endif
+
   PropertyMap m_mapProperties;
 
-  PropertyMap& GetPropertyDict() { return m_mapProperties; }
-
-protected:
-  CStdString m_strGrandparentThumbnailImage;
-  std::vector<CStdString> m_strThumbnailImageList;
-  /* END PLEX */
 
 private:
   CStdStringW m_sortLabel;    // text for sorting. Need to be UTF16 for proper sorting

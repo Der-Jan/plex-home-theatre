@@ -28,7 +28,7 @@
 
 
 #define FAILURE_TMOUT 3600
-#define SUCCESS_TMOUT 60 * 3
+#define SUCCESS_TMOUT 30 * 60
 
 void
 CMyPlexManager::Process()
@@ -268,7 +268,8 @@ int CMyPlexManager::DoRefreshUserInfo()
   TiXmlElement* root = GetXml(url);
   if (!root)
   {
-    DoRemoveAllServers();
+    if (m_lastError != ERROR_NETWORK)
+      DoRemoveAllServers();
     return FAILURE_TMOUT;
   }
 
