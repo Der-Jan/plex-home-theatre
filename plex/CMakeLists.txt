@@ -68,7 +68,6 @@ add_subdirectory(Remote)
 add_subdirectory(Filters)
 add_subdirectory(Playlists)
 add_subdirectory(Windows)
-add_subdirectory(AutoUpdate)
 add_subdirectory(Tests)
 
 include(BreakpadSymbols)
