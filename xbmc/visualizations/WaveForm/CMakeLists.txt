@@ -1,3 +1,4 @@
+set(TARGET_NAME waveform)
 if(TARGET_WIN32)
   set(TARGET_NAME waveform_win32)
 endif(TARGET_WIN32)
