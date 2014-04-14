@@ -20,7 +20,7 @@ if(ENABLE_TESTING)
   enable_testing()
 endif(ENABLE_TESTING)
 
-if(NOT TARGET_RPI)
+if(NOT (TARGET_RPI OR TARGET_ION))
   OPTION(ENABLE_AUTOUPDATE "Enable the cool autoupdate system" ON)
   OPTION(COMPRESS_TEXTURES "If we should compress the textures or not" ON)
 endif()
