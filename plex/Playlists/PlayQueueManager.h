@@ -4,14 +4,14 @@
 #include "FileItem.h"
 #include "Job.h"
 #include "playlists/PlayList.h"
-#include "gtest/gtest.h"
+// #include "gtest/gtest.h"
 
-class PlayQueueManagerTest;
+// class PlayQueueManagerTest;
 
 class CPlayQueueManager : public IJobCallback
 {
-  friend class PlayQueueManagerTest;
-  FRIEND_TEST(PlayQueueManagerTest, VerifyServerInItem_basic);
+//  friend class PlayQueueManagerTest;
+//  FRIEND_TEST(PlayQueueManagerTest, VerifyServerInItem_basic);
 
 public:
   CPlayQueueManager();
