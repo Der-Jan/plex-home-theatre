@@ -44,19 +44,24 @@ public:
   static bool CacheTexture(CBaseTexture *texture, uint32_t &dest_width, uint32_t &dest_height, const std::string &dest);
   static bool CacheTexture(uint8_t *pixels, uint32_t width, uint32_t height, uint32_t pitch, int orientation, uint32_t &dest_width, uint32_t &dest_height, const std::string &dest);
 
+  /* PLEX */
+  static bool CacheBanner(const CStdString& SourceUrl, const CStdString& destFile);
+  static bool CacheImage(const CStdString& sourceUrl, const CStdString& destFile, int width = 0, int height = 0);
+  /* END PLEX */
+
 private:
   static void GetScale(unsigned int width, unsigned int height, unsigned int &out_width, unsigned int &out_height);
   static bool ScaleImage(uint8_t *in_pixels, unsigned int in_width, unsigned int in_height, unsigned int in_pitch,
                          uint8_t *out_pixels, unsigned int out_width, unsigned int out_height, unsigned int out_pitch);
   static bool OrientateImage(uint32_t *&pixels, unsigned int &width, unsigned int &height, int orientation);
 
-  static uint32_t *FlipHorizontal(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *FlipVertical(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *Rotate90CCW(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *Rotate270CCW(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *Rotate180CCW(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *Transpose(uint32_t *pixels, unsigned int width, unsigned int height);
-  static uint32_t *TransposeOffAxis(uint32_t *pixels, unsigned int width, unsigned int height);
+  static bool FlipHorizontal(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool FlipVertical(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool Rotate90CCW(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool Rotate270CCW(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool Rotate180CCW(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool Transpose(uint32_t *&pixels, unsigned int &width, unsigned int &height);
+  static bool TransposeOffAxis(uint32_t *&pixels, unsigned int &width, unsigned int &height);
 };
 
 //this class calls CreateThumbnailFromSurface in a CJob, so a png file can be written without halting the render thread

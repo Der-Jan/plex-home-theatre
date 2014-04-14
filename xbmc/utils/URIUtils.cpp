@@ -701,6 +701,20 @@ bool URIUtils::IsFTP(const CStdString& strFile)
 bool URIUtils::IsInternetStream(const CURL& url, bool bStrictCheck /* = false */)
 {
   CStdString strProtocol = url.GetProtocol();
+
+  /* PLEX */
+  // PMS files always count as streams (needed for
+  // thumbnails on LAN, strangely enough).
+  //
+  if (url.GetProtocol() == "plexserver")
+    return true;
+  
+  if (url.GetPort() == 32400)
+    return true;
+
+  if (IsOnLAN( url.Get() ))
+    return false;
+  /* END PLEX */
   
   if (strProtocol.IsEmpty())
     return false;
@@ -880,9 +894,15 @@ void URIUtils::AddSlashAtEnd(CStdString& strFolder)
   }
 }
 
-bool URIUtils::HasSlashAtEnd(const CStdString& strFile)
+bool URIUtils::HasSlashAtEnd(const CStdString& strFile, bool checkURL /* = false */)
 {
   if (strFile.size() == 0) return false;
+  if (checkURL && IsURL(strFile))
+  {
+    CURL url(strFile);
+    CStdString file = url.GetFileName();
+    return file.IsEmpty() || HasSlashAtEnd(file, false);
+  }
   char kar = strFile.c_str()[strFile.size() - 1];
 
   if (kar == '/' || kar == '\\')

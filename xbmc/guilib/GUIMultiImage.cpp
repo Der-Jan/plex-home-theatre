@@ -81,6 +81,9 @@ void CGUIMultiImage::UpdateVisibility(const CGUIListItem *item)
     return;
   }
 
+  /* PLEX */
+  CSingleLock lk(m_section);
+  /* END PLEX */
   // we are either delayed or visible, so we can allocate our resources
   if (m_directoryStatus == UNLOADED)
     LoadDirectory();
@@ -114,6 +117,10 @@ void CGUIMultiImage::UpdateInfo(const CGUIListItem *item)
 
 void CGUIMultiImage::Process(unsigned int currentTime, CDirtyRegionList &dirtyregions)
 {
+  /* PLEX */
+  CSingleLock lk(m_section);
+  /* END PLEX */
+
   // Set a viewport so that we don't render outside the defined area
   if (m_directoryStatus == READY && !m_files.empty())
   {
@@ -171,6 +178,29 @@ bool CGUIMultiImage::OnMessage(CGUIMessage &message)
       FreeResources();
     return true;
   }
+  /* PLEX */
+  else if (message.GetMessage() == GUI_MSG_LABEL_BIND && message.GetPointer())
+  {
+    /* PLEX */
+    CSingleLock lk(m_section);
+    /* END PLEX */
+
+    CFileItemList* list = (CFileItemList*)message.GetPointer();
+    m_plexFiles.clear();
+    m_plexLabels.clear();
+
+    for (int i = 0; i < list->Size(); i ++)
+    {
+      m_plexFiles.push_back(list->Get(i)->GetPath());
+      m_plexLabels[list->Get(i)->GetPath()] = list->Get(i)->GetLabel();
+    }
+    
+    m_directoryStatus = UNLOADED;
+    AllocResources();
+    
+    return true;
+  }
+  /* END PLEX */
   return CGUIControl::OnMessage(message);
 }
 
@@ -179,6 +209,9 @@ void CGUIMultiImage::AllocResources()
   FreeResources();
   CGUIControl::AllocResources();
 
+  /* PLEX */
+  CSingleLock lk(m_section);
+  /* END PLEX */
   if (m_directoryStatus == UNLOADED)
     LoadDirectory();
 }
@@ -220,8 +253,21 @@ void CGUIMultiImage::LoadDirectory()
   m_files.clear();
 
   // don't load any images if our path is empty
+#ifndef __PLEX__
   if (m_currentPath.IsEmpty()) return;
-
+#else
+  if (m_currentPath.IsEmpty() && m_plexFiles.empty()) return;
+#endif
+  
+  /* PLEX - first check our own vector */
+  if (!m_plexFiles.empty())
+  {
+    for (int i = 0 ; i < m_plexFiles.size(); i++)
+      m_files.push_back(m_plexFiles[i]);
+    
+    OnDirectoryLoaded();
+    return;
+  }
   /* Check the fast cases:
    1. Picture extension
    2. Cached picture (in case an extension is not present)
@@ -247,11 +293,19 @@ void CGUIMultiImage::OnDirectoryLoaded()
 {
   // Randomize or sort our images if necessary
   if (m_randomized)
+  {
+    /* PLEX */
+    std::srand(std::time(0));
+    /* END PLEX */
     random_shuffle(m_files.begin(), m_files.end());
+  }
   else
     sort(m_files.begin(), m_files.end());
 
   // flag as loaded - no point in constantly reloading them
+  /* PLEX */
+  CSingleLock lk(m_section);
+  /* END PLEX */
   m_directoryStatus = READY;
   m_imageTimer.StartZero();
   m_currentImage = 0;

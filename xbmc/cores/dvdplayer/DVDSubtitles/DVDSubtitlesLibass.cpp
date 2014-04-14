@@ -39,7 +39,6 @@ static void libass_log(int level, const char *fmt, va_list args, void *data)
 
 CDVDSubtitlesLibass::CDVDSubtitlesLibass()
 {
-
   m_track = NULL;
   m_library = NULL;
   m_renderer = NULL;

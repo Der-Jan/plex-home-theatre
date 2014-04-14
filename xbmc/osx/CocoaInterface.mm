@@ -177,9 +177,15 @@ void Cocoa_DoAppleScript(const char* scriptSource)
 void Cocoa_DoAppleScriptFile(const char* filePath)
 {
   NSString* scriptFile = [NSString stringWithUTF8String:filePath];
+#ifndef __PLEX__
   NSString* userScriptsPath = [@"~/Library/Application Support/XBMC/scripts" stringByExpandingTildeInPath];
   NSString* bundleScriptsPath = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"Contents/Resources/XBMC/scripts"];
   NSString* bundleSysScriptsPath = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"Contents/Resources/XBMC/system/AppleScripts"];
+#else
+  NSString* userScriptsPath = [@"~/Library/Application Support/Plex/scripts" stringByExpandingTildeInPath];
+  NSString* bundleScriptsPath = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"Contents/Resources/Plex/scripts"];
+  NSString* bundleSysScriptsPath = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"Contents/Resources/Plex/system/AppleScripts"];
+#endif
 
   // Check whether a script exists in the app bundle's AppleScripts folder
   if ([[NSFileManager defaultManager] fileExistsAtPath:[bundleSysScriptsPath stringByAppendingPathComponent:scriptFile]])
@@ -213,8 +219,13 @@ const char* Cocoa_GetIconFromBundle(const char *_bundlePath, const char* _iconNa
   if (![[NSFileManager defaultManager] fileExistsAtPath:iconPath]) return NULL;
 
   // Get the path to the target PNG icon
+#ifndef __PLEX__
   NSString* pngFile = [[NSString stringWithFormat:@"~/Library/Application Support/XBMC/userdata/Thumbnails/%@-%@.png",
     bundleIdentifier, iconName] stringByExpandingTildeInPath];
+#else
+  NSString* pngFile = [[NSString stringWithFormat:@"~/Library/Application Support/Plex/userdata/Thumbnails/%@-%@.png",
+    bundleIdentifier, iconName] stringByExpandingTildeInPath];
+#endif
 
   // If no PNG has been created, open the ICNS file & convert
   if (![[NSFileManager defaultManager] fileExistsAtPath:pngFile])
@@ -373,31 +384,6 @@ void Cocoa_ShowMouse()
 }
 
 //---------------------------------------------------------------------------------
-static char strVersion[32];
-
-const char* Cocoa_GetAppVersion()
-{
-  // Get the main bundle for the app and return the version.
-  CFBundleRef mainBundle = CFBundleGetMainBundle();
-  CFStringRef versStr = (CFStringRef)CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleVersionKey);
-  
-  memset(strVersion,0,32);
-  
-  if (versStr != NULL && CFGetTypeID(versStr) == CFStringGetTypeID())
-  {
-    bool res = CFStringGetCString(versStr, strVersion, 32,kCFStringEncodingUTF8);
-    if (!res)
-    {
-      printf("Error converting version string\n");      
-      strcpy(strVersion, "SVN");
-    }
-  }
-  else
-    strcpy(strVersion, "SVN");
-  
-  return strVersion;
-}
-
 bool Cocoa_HasVDADecoder()
 {
   static int result = -1;

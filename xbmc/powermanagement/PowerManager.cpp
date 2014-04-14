@@ -1,4 +1,4 @@
-/*
+ /*
  *      Copyright (C) 2005-2012 Team XBMC
  *      http://www.xbmc.org
  *
@@ -21,6 +21,7 @@
 #include "system.h"
 #include "PowerManager.h"
 #include "Application.h"
+#include "cores/AudioEngine/AEFactory.h"
 #include "input/KeyboardStat.h"
 #include "settings/GUISettings.h"
 #include "windowing/WindowingFactory.h"
@@ -38,6 +39,11 @@
 
 #if defined(TARGET_DARWIN)
 #include "osx/CocoaPowerSyscall.h"
+
+/* PLEX */
+#include "Helper/PlexHTHelper.h"
+/* END PLEX */
+
 #elif defined(TARGET_ANDROID)
 #include "android/AndroidPowerSyscall.h"
 #elif defined(_LINUX) && defined(HAS_DBUS)
@@ -202,10 +208,13 @@ void CPowerManager::OnSleep()
   CBuiltins::Execute("LIRC.Stop");
 #endif
 
+#ifndef __PLEX__
   g_application.SaveFileState(true);
+#endif
   g_application.StopPlaying();
   g_application.StopShutdownTimer();
   g_application.StopScreenSaverTimer();
+  CAEFactory::Suspend();
 }
 
 void CPowerManager::OnWake()
@@ -218,10 +227,10 @@ void CPowerManager::OnWake()
 #if defined(HAS_SDL) || defined(TARGET_WINDOWS)
   if (g_Windowing.IsFullScreen())
   {
-#ifdef _WIN32
+#if defined(_WIN32)
     ShowWindow(g_hWnd,SW_RESTORE);
     SetForegroundWindow(g_hWnd);
-#else
+#elif !defined(TARGET_DARWIN_OSX)
     // Hack to reclaim focus, thus rehiding system mouse pointer.
     // Surely there's a better way?
     g_graphicsContext.ToggleFullScreenRoot();
@@ -245,8 +254,13 @@ void CPowerManager::OnWake()
   g_lcd->Initialize();
 #endif
 
+  CAEFactory::Resume();
   g_application.UpdateLibraries();
   g_weatherManager.Refresh();
+
+  /* PLEX */
+  g_application.OnWakeUp();
+  /* END PLEX */
 
   CAnnouncementManager::Announce(System, "xbmc", "OnWake");
 }

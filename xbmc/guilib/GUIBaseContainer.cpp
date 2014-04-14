@@ -32,6 +32,10 @@
 #include "utils/MathUtils.h"
 #include "utils/XBMCTinyXML.h"
 
+/* PLEX */
+#include "plex/PlexTypes.h"
+/* END PLEX */
+
 using namespace std;
 
 #define HOLD_TIME_START 100
@@ -129,18 +133,27 @@ void CGUIBaseContainer::Process(unsigned int currentTime, CDirtyRegionList &dirt
     if (itemNo >= 0)
     {
       CGUIListItemPtr item = m_items[itemNo];
+      long oldDirty = dirtyregions.size();
       // render our item
       if (m_orientation == VERTICAL)
+#ifndef __PLEX__
         ProcessItem(origin.x, pos, item, focused, currentTime, dirtyregions);
       else
         ProcessItem(pos, origin.y, item, focused, currentTime, dirtyregions);
+#else
+        ProcessItem(origin.x, pos, item, focused && HasFocus(), currentTime, dirtyregions);
+      else
+        ProcessItem(pos, origin.y, item, focused && HasFocus(), currentTime, dirtyregions);
+#endif
     }
     // increment our position
     pos += focused ? m_focusedLayout->Size(m_orientation) : m_layout->Size(m_orientation);
     current++;
   }
 
-  UpdatePageControl(offset);
+  // when we are scrolling up, offset will become lower (integer division, see offset calc)
+  // to have same behaviour when scrolling down, we need to set page control to offset+1
+  UpdatePageControl(offset + (m_scroller.IsScrollingDown() ? 1 : 0));
 
   CGUIControl::Process(currentTime, dirtyregions);
 }
@@ -254,15 +267,13 @@ void CGUIBaseContainer::Render()
     if (focusedItem)
     {
       if (m_orientation == VERTICAL)
-        RenderItem(origin.x, focusedPos, focusedItem.get(), true);
+        RenderItem(origin.x, focusedPos, focusedItem.get(), HasFocus()); /* PLEX Changed to HasFocus */
       else
-        RenderItem(focusedPos, origin.y, focusedItem.get(), true);
+        RenderItem(focusedPos, origin.y, focusedItem.get(), HasFocus()); /* PLEX Changed to HasFocus */
     }
 
     g_graphicsContext.RestoreClipRegion();
   }
-
-  UpdatePageControl(offset);
 
   CGUIControl::Render();
 }
@@ -458,6 +469,39 @@ bool CGUIBaseContainer::OnMessage(CGUIMessage& message)
       }
       return true;
     }
+    /* PLEX */
+    else if (message.GetMessage() == GUI_MSG_SETFOCUS)
+    {
+      if (message.GetParam1()) // subfocus item is specified, so set the offset appropriately
+      {
+        int newItem = (int)message.GetParam1() - 1;
+        if (newItem != GetSelectedItem())
+        {
+          SelectItem(newItem);
+
+          // Send another SETFOCUS message to ensure focused items are displayed correctly. A bit of a hack, but seems to work.
+          CGUIMessage msg(GUI_MSG_SETFOCUS, GetID(), GetID(), 0, 0);
+          SendWindowMessage(msg);
+
+          return true;
+        }
+      }
+    }
+    else if (message.GetMessage() == GUI_MSG_LIST_REMOVE_ITEM)
+    {
+      if (message.GetParam1())
+      {
+        int removeItem = (int)message.GetParam1() - 1;
+        m_items.erase(m_items.begin() + removeItem);
+
+        if (removeItem == GetSelectedItem())
+          SelectItem(0);
+
+        SetInvalid();
+        return true;
+      }
+    }
+    /* END PLEX */
   }
   return CGUIControl::OnMessage(message);
 }
@@ -555,7 +599,11 @@ void CGUIBaseContainer::OnJumpLetter(char letter, bool skip /*=false*/)
   do
   {
     CGUIListItemPtr item = m_items[i];
+#ifndef __PLEX__
     if (0 == strnicmp(SortUtils::RemoveArticles(item->GetLabel()).c_str(), m_match.c_str(), m_match.size()))
+#else
+    if (0 == strnicmp((const char *)item->GetSortLabel().c_str(), m_match.c_str(), m_match.size()))
+#endif
     {
       SelectItem(i);
       return;
@@ -825,6 +873,7 @@ void CGUIBaseContainer::UpdateLayout(bool updateAllItems)
   // and recalculate the layout
   CalculateLayout();
   SetPageControlRange();
+  CLog::Log(LOGDEBUG, "UpdateLayout");
   MarkDirtyRegion();
 }
 
@@ -1199,8 +1248,13 @@ CStdString CGUIBaseContainer::GetLabel(int info) const
   case CONTAINER_NUM_ITEMS:
     {
       unsigned int numItems = GetNumItems();
+#ifndef __PLEX__
       if (numItems && m_items[0]->IsFileItem() && (boost::static_pointer_cast<CFileItem>(m_items[0]))->IsParentFolder())
         label.Format("%u", numItems-1);
+#else
+      if (numItems && m_items[0]->IsFileItem() && m_items[0]->GetProperty("isAllItems").asBoolean())
+          label.Format("%u", numItems - 1);
+#endif
       else
         label.Format("%u", numItems);
     }
@@ -1277,3 +1331,12 @@ void CGUIBaseContainer::OnFocus()
 
   CGUIControl::OnFocus();
 }
+
+/* PLEX */
+int CGUIBaseContainer::GetSelectedItemID() const
+{
+  if (!m_items.size()) return -1;
+  CFileItemPtr item = boost::static_pointer_cast<CFileItem>(m_items[GetSelectedItem()]);
+  return item->m_iprogramCount;
+}
+/* END PLEX */

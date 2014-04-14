@@ -37,10 +37,6 @@
 #include "guilib/LocalizeStrings.h"
 #include "cores/AudioEngine/Utils/AEConvert.h"
 
-#ifndef VOLUME_MINIMUM
-#define VOLUME_MINIMUM -6000  // -60dB
-#endif
-
 using namespace std;
 
 #define OMX_MAX_CHANNELS 10
@@ -76,6 +72,19 @@ static const uint16_t AC3Bitrates[] = {32, 40, 48, 56, 64, 80, 96, 112, 128, 160
 static const uint16_t AC3FSCod   [] = {48000, 44100, 32000, 0};
 
 static const uint16_t DTSFSCod   [] = {0, 8000, 16000, 32000, 0, 0, 11025, 22050, 44100, 0, 0, 12000, 24000, 48000, 0, 0};
+
+// 7.1 downmixing coefficients
+const float downmixing_coefficients_8[OMX_AUDIO_MAXCHANNELS] = {
+  //        L       R
+  /* L */   1,      0,
+  /* R */   0,      1,
+  /* C */   0.7071, 0.7071,
+  /* LFE */ 0.7071, 0.7071,
+  /* Ls */  0.7071, 0,
+  /* Rs */  0,      0.7071,
+  /* Lr */  0.7071, 0,
+  /* Rr */  0,      0.7071
+};
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -197,8 +206,6 @@ bool COMXAudio::Initialize(AEAudioFormat format, std::string& device, OMXClock *
   m_omx_clock   = m_av_clock->GetOMXClock();
 
   m_drc         = 0;
-
-  m_CurrentVolume = g_settings.m_fVolumeLevel; 
 
   memset(m_input_channels, 0x0, sizeof(m_input_channels));
   memset(m_output_channels, 0x0, sizeof(m_output_channels));
@@ -323,6 +330,8 @@ bool COMXAudio::Initialize(AEAudioFormat format, std::string& device, OMXClock *
 
   if(!m_omx_render->Initialize((const std::string)componentName, OMX_IndexParamAudioInit))
     return false;
+
+  m_omx_render->ResetEos();
 
   OMX_CONFIG_BRCMAUDIODESTINATIONTYPE audioDest;
   OMX_INIT_STRUCTURE(audioDest);
@@ -545,8 +554,6 @@ bool COMXAudio::Initialize(AEAudioFormat format, std::string& device, OMXClock *
   m_first_frame   = true;
   m_last_pts      = DVD_NOPTS_VALUE;
 
-  SetCurrentVolume(m_CurrentVolume);
-
   CLog::Log(LOGDEBUG, "COMXAudio::Initialize Ouput bps %d samplerate %d channels %d buffer size %d bytes per second %d", 
       (int)m_pcm_output.nBitPerSample, (int)m_pcm_output.nSamplingRate, (int)m_pcm_output.nChannels, m_BufferLen, m_BytesPerSec);
   CLog::Log(LOGDEBUG, "COMXAudio::Initialize Input bps %d samplerate %d channels %d buffer size %d bytes per second %d", 
@@ -694,20 +701,76 @@ bool COMXAudio::SetCurrentVolume(float fVolume)
   CSingleLock lock (m_critSection);
 
   if(!m_Initialized || m_Passthrough)
-    return -1;
-
+    return false;
+  double gain = pow(10, (g_advancedSettings.m_ac3Gain - 12.0f) / 20.0);
   m_CurrentVolume = fVolume;
 
-  OMX_AUDIO_CONFIG_VOLUMETYPE volume;
-  OMX_INIT_STRUCTURE(volume);
-  volume.nPortIndex = m_omx_render->GetInputPort();
+  if (m_format.m_channelLayout.Count() > 2)
+  {
+    double r = fVolume;
+    const float* coeff = downmixing_coefficients_8;
+    int input_channels = 0;
 
-  volume.bLinear    = OMX_TRUE;
-  float hardwareVolume = std::max(VOLUME_MINIMUM, std::min(VOLUME_MAXIMUM, fVolume)) * 100.0f;
-  volume.sVolume.nValue = (int)hardwareVolume;
+    // normally we normalalise the levels, can be skipped (boosted) at risk of distortion
+    if(!g_guiSettings.GetBool("audiooutput.normalizelevels"))
+    {
+      double sum_L = 0;
+      double sum_R = 0;
 
-  m_omx_render->SetConfig(OMX_IndexConfigAudioVolume, &volume);
+      for(size_t i = 0; i < OMX_AUDIO_MAXCHANNELS; ++i)
+      {
+        if (m_input_channels[i] == OMX_AUDIO_ChannelMax)
+          break;
+        if(i & 1)
+          sum_R += coeff[i];
+        else
+          sum_L += coeff[i];
+      }
 
+      r /= max(sum_L, sum_R);
+    }
+
+    // the analogue volume is too quiet for some. Allow use of an advancedsetting to boost this (at risk of distortion)
+    r *= gain;
+
+    OMX_CONFIG_BRCMAUDIODOWNMIXCOEFFICIENTS mix;
+    OMX_INIT_STRUCTURE(mix);
+    mix.nPortIndex = m_omx_mixer.GetInputPort();
+
+    assert(sizeof(mix.coeff)/sizeof(mix.coeff[0]) == 16);
+
+    for(size_t i = 0; i < 16; ++i)
+      mix.coeff[i] = static_cast<unsigned int>(0x10000 * (coeff[i] * r));
+
+    OMX_ERRORTYPE omx_err =
+      m_omx_mixer.SetConfig(OMX_IndexConfigBrcmAudioDownmixCoefficients, &mix);
+
+    if(omx_err != OMX_ErrorNone)
+    {
+      CLog::Log(LOGERROR, "%s::%s - error setting OMX_IndexConfigBrcmAudioDownmixCoefficients, error 0x%08x\n",
+                CLASSNAME, __func__, omx_err);
+      return false;
+    }
+  }
+  else
+  {
+    OMX_AUDIO_CONFIG_VOLUMETYPE volume;
+    OMX_INIT_STRUCTURE(volume);
+    volume.nPortIndex = m_omx_render->GetInputPort();
+
+    volume.bLinear    = OMX_TRUE;
+    float hardwareVolume = fVolume * gain * 100.0f;
+    volume.sVolume.nValue = (int)(hardwareVolume + 0.5f);
+
+    OMX_ERRORTYPE omx_err =
+      m_omx_render->SetConfig(OMX_IndexConfigAudioVolume, &volume);
+    if(omx_err != OMX_ErrorNone)
+    {
+      CLog::Log(LOGERROR, "%s::%s - error setting OMX_IndexConfigAudioVolume, error 0x%08x\n",
+                CLASSNAME, __func__, omx_err);
+      return false;
+    }
+  }  
   return true;
 }
 
@@ -805,6 +868,8 @@ unsigned int COMXAudio::AddPackets(const void* data, unsigned int len, double dt
     if(m_av_clock->AudioStart())
     {
       omx_buffer->nFlags = OMX_BUFFERFLAG_STARTTIME;
+      if(pts == DVD_NOPTS_VALUE)
+        omx_buffer->nFlags |= OMX_BUFFERFLAG_TIME_UNKNOWN;
 
       m_last_pts = pts;
 
@@ -845,6 +910,7 @@ unsigned int COMXAudio::AddPackets(const void* data, unsigned int len, double dt
       omx_err = m_omx_decoder.EmptyThisBuffer(omx_buffer);
       if (omx_err == OMX_ErrorNone)
       {
+        //CLog::Log(LOGINFO, "AudiD: dts:%.0f pts:%.0f size:%d\n", dts, pts, len);
         break;
       }
       else
@@ -883,16 +949,6 @@ unsigned int COMXAudio::AddPackets(const void* data, unsigned int len, double dt
           {
             CLog::Log(LOGERROR, "COMXAudio::AddPackets error GetParameter 1 omx_err(0x%08x)\n", omx_err);
           }
-        }
-
-        if ((m_pcm_input.nChannels > m_pcm_output.nChannels) &&g_guiSettings.GetBool("audiooutput.normalizelevels"))
-        {
-          OMX_AUDIO_CONFIG_VOLUMETYPE volume;
-          OMX_INIT_STRUCTURE(volume);
-          volume.nPortIndex = m_omx_mixer.GetInputPort();
-          volume.bLinear    = OMX_FALSE;
-          volume.sVolume.nValue = (int)(g_advancedSettings.m_ac3Gain*100.0f+0.5f);
-          m_omx_mixer.SetConfig(OMX_IndexConfigAudioVolume, &volume);
         }
 
         memcpy(m_pcm_input.eChannelMapping, m_input_channels, sizeof(m_input_channels));
@@ -1083,6 +1139,8 @@ void COMXAudio::UnRegisterAudioCallback()
 
 unsigned int COMXAudio::GetAudioRenderingLatency()
 {
+  CSingleLock lock (m_critSection);
+
   if(!m_Initialized)
     return 0;
 
@@ -1103,7 +1161,7 @@ unsigned int COMXAudio::GetAudioRenderingLatency()
   return param.nU32;
 }
 
-void COMXAudio::WaitCompletion()
+void COMXAudio::SubmitEOS()
 {
   CSingleLock lock (m_critSection);
 
@@ -1131,43 +1189,15 @@ void COMXAudio::WaitCompletion()
     CLog::Log(LOGERROR, "%s::%s - OMX_EmptyThisBuffer() failed with result(0x%x)\n", CLASSNAME, __func__, omx_err);
     return;
   }
+}
 
-  unsigned int nTimeOut = AUDIO_BUFFER_SECONDS * 1000;
-  while(nTimeOut)
-  {
-    if(m_omx_render->IsEOS())
-    {
-      CLog::Log(LOGDEBUG, "%s::%s - got eos\n", CLASSNAME, __func__);
-      break;
-    }
-
-    if(nTimeOut == 0)
-    {
-      CLog::Log(LOGERROR, "%s::%s - wait for eos timed out\n", CLASSNAME, __func__);
-      break;
-    }
-    Sleep(50);
-    nTimeOut -= 50;
-  }
-
-  nTimeOut = AUDIO_BUFFER_SECONDS * 1000;
-  while(nTimeOut)
-  {
-    if(!GetAudioRenderingLatency())
-      break;
-
-    if(nTimeOut == 0)
-    {
-      CLog::Log(LOGERROR, "%s::%s - wait for GetAudioRenderingLatency timed out\n", CLASSNAME, __func__);
-      break;
-    }
-    Sleep(50);
-    nTimeOut -= 50;
-  }
-
-  m_omx_render->ResetEos();
-
-  return;
+bool COMXAudio::IsEOS()
+{
+  if(!m_Initialized || m_Pause)
+    return true;
+  unsigned int latency = GetAudioRenderingLatency();
+  CSingleLock lock (m_critSection);
+  return m_omx_decoder.IsEOS() && latency <= 0;
 }
 
 void COMXAudio::SwitchChannels(int iAudioStream, bool bAudioOnAllSpeakers)

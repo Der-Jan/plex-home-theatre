@@ -45,7 +45,8 @@ CCoreAudioAEHALOSX::CCoreAudioAEHALOSX() :
   m_encoded           (false  ),
   m_initVolume        (1.0f   ),
   m_NumLatencyFrames  (0      ),
-  m_OutputBufferIndex (0      )
+  m_OutputBufferIndex (0      ),
+  m_ae                (NULL   )
 {
   m_AudioDevice   = new CCoreAudioDevice();
   m_OutputStream  = new CCoreAudioStream();
@@ -84,7 +85,7 @@ CCoreAudioAEHALOSX::~CCoreAudioAEHALOSX()
   delete m_OutputStream;
 }
 
-bool CCoreAudioAEHALOSX::InitializePCM(ICoreAudioSource *pSource, AEAudioFormat &format, bool allowMixing, AudioDeviceID outputDevice)
+bool CCoreAudioAEHALOSX::InitializePCM(ICoreAudioSource *pSource, AEAudioFormat &format, bool allowMixing, AudioDeviceID outputDevice, bool encoded)
 {
   if (m_audioGraph)
     m_audioGraph->Close(), delete m_audioGraph;
@@ -97,7 +98,7 @@ bool CCoreAudioAEHALOSX::InitializePCM(ICoreAudioSource *pSource, AEAudioFormat 
   if (!m_Passthrough && g_guiSettings.GetInt("audiooutput.mode") == AUDIO_IEC958)
     layout = g_LayoutMap[1];
 
-  if (!m_audioGraph->Open(pSource, format, outputDevice, allowMixing, layout, m_initVolume ))
+  if (!m_audioGraph->Open(pSource, format, outputDevice, allowMixing, layout, m_initVolume, encoded ))
   {
     CLog::Log(LOGDEBUG, "CCoreAudioAEHALOSX::Initialize: "
       "Unable to initialize audio due a missconfiguration. Try 2.0 speaker configuration.");
@@ -120,7 +121,7 @@ bool CCoreAudioAEHALOSX::InitializePCMEncoded(ICoreAudioSource *pSource, AEAudio
   // Set the Sample Rate as defined by the spec.
   m_AudioDevice->SetNominalSampleRate((float)format.m_sampleRate);
 
-  if (!InitializePCM(pSource, format, false, outputDevice))
+  if (!InitializePCM(pSource, format, false, outputDevice, true))
     return false;
 
   return true;
@@ -396,8 +397,7 @@ void CCoreAudioAEHALOSX::EnumerateOutputDevices(AEDeviceList &devices, bool pass
   CoreAudioDeviceList deviceList;
   CCoreAudioHardware::GetOutputDevices(&deviceList);
 
-  std::string defaultDeviceName;
-  CCoreAudioHardware::GetOutputDeviceName(defaultDeviceName);
+  devices.push_back(AEDevice("Default", "CoreAudio:default"));
 
   std::string deviceName;
   for (int i = 0; !deviceList.empty(); i++)

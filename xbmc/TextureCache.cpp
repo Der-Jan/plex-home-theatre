@@ -29,6 +29,10 @@
 #include "utils/URIUtils.h"
 #include "URL.h"
 
+/* PLEX */
+#include "PlexUtils.h"
+/* END PLEX */
+
 using namespace XFILE;
 
 CTextureCache &CTextureCache::Get()
@@ -38,6 +42,11 @@ CTextureCache &CTextureCache::Get()
 }
 
 CTextureCache::CTextureCache()
+/* PLEX */
+#ifndef TARGET_RPI
+  : CJobQueue(false, 2)
+#endif
+/* END PLEX */
 {
 }
 

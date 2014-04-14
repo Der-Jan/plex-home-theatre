@@ -112,10 +112,12 @@ CGUIViewState* CGUIViewState::GetViewState(int windowId, const CFileItemList& it
   if (url.GetProtocol() == "androidapp")
     return new CGUIViewStateWindowPrograms(items);
 
+#ifndef __PLEX__
   if (windowId==WINDOW_MUSIC_NAV)
     return new CGUIViewStateWindowMusicNav(items);
+#endif
 
-  if (windowId==WINDOW_MUSIC_FILES)
+  if (windowId==WINDOW_MUSIC_FILES || windowId==WINDOW_MUSIC_NAV)
     return new CGUIViewStateWindowMusicSongs(items);
 
   if (windowId==WINDOW_MUSIC_PLAYLIST)
@@ -124,17 +126,21 @@ CGUIViewState* CGUIViewState::GetViewState(int windowId, const CFileItemList& it
   if (windowId==WINDOW_MUSIC_PLAYLIST_EDITOR)
     return new CGUIViewStateWindowMusicSongs(items);
 
-  if (windowId==WINDOW_VIDEO_FILES)
+  if (windowId==WINDOW_VIDEO_FILES || windowId==WINDOW_VIDEO_NAV)
     return new CGUIViewStateWindowVideoFiles(items);
 
+#ifndef __PLEX__
   if (windowId==WINDOW_VIDEO_NAV)
     return new CGUIViewStateWindowVideoNav(items);
+#endif
 
   if (windowId==WINDOW_VIDEO_PLAYLIST)
     return new CGUIViewStateWindowVideoPlaylist(items);
 
+#ifndef __PLEX__
   if (windowId==WINDOW_PVR)
     return new CGUIViewStatePVR(items);
+#endif
 
   if (windowId==WINDOW_PICTURES)
     return new CGUIViewStateWindowPictures(items);
@@ -309,7 +315,11 @@ bool CGUIViewState::HideExtensions()
 
 bool CGUIViewState::HideParentDirItems()
 {
+#ifndef __PLEX__
   return !g_guiSettings.GetBool("filelists.showparentdiritems");
+#else
+  return true;
+#endif
 }
 
 bool CGUIViewState::DisableAddSourceButtons()
@@ -322,7 +332,15 @@ bool CGUIViewState::DisableAddSourceButtons()
 
 int CGUIViewState::GetPlaylist()
 {
-  return m_playlist;
+  /* PLEX */
+  if (m_items.IsPlexMediaServer() == true)
+  {
+    if (m_items.IsPlexMediaServerMusic() == true)
+      return PLAYLIST_MUSIC;
+  }
+
+  return PLAYLIST_NONE;
+  /* END PLEX */
 }
 
 const CStdString& CGUIViewState::GetPlaylistDirectory()
@@ -350,6 +368,11 @@ bool CGUIViewState::IsCurrentPlaylistDirectory(const CStdString& strDirectory)
 
 bool CGUIViewState::AutoPlayNextItem()
 {
+  /* PLEX */
+  if (m_items.IsPlexMediaServer() == true && m_items.IsPlexMediaServerMusic() == true)
+    return true;
+  /* END PLEX */
+
   return false;
 }
 
@@ -446,6 +469,7 @@ void CGUIViewState::SetSortOrder(SortOrder sortOrder)
 
 void CGUIViewState::LoadViewState(const CStdString &path, int windowID)
 { // get our view state from the db
+#ifndef __PLEX__
   CViewDatabase db;
   if (db.Open())
   {
@@ -459,10 +483,12 @@ void CGUIViewState::LoadViewState(const CStdString &path, int windowID)
     }
     db.Close();
   }
+#endif
 }
 
 void CGUIViewState::SaveViewToDb(const CStdString &path, int windowID, CViewState *viewState)
 {
+#ifndef __PLEX__
   CViewDatabase db;
   if (db.Open())
   {
@@ -474,6 +500,7 @@ void CGUIViewState::SaveViewToDb(const CStdString &path, int windowID, CViewStat
     if (viewState)
       g_settings.Save();
   }
+#endif
 }
 
 void CGUIViewState::AddPlaylistOrder(const CFileItemList &items, LABEL_MASKS label_masks)

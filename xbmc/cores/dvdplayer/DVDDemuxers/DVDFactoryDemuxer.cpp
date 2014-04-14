@@ -38,6 +38,7 @@
 using namespace std;
 using namespace PVR;
 
+#ifndef __PLEX__
 CDVDDemux* CDVDFactoryDemuxer::CreateDemuxer(CDVDInputStream* pInputStream)
 {
   // Try to open the AirTunes demuxer
@@ -117,6 +118,37 @@ CDVDDemux* CDVDFactoryDemuxer::CreateDemuxer(CDVDInputStream* pInputStream)
   if(demuxer->Open(pInputStream))
     return demuxer.release();
   else
+  {
+    /* PLEX */
+    error = demuxer->GetError();
+    /* END PLEX */
     return NULL;
+  }
 }
+#else
+CDVDDemux* CDVDFactoryDemuxer::CreateDemuxer(CDVDInputStream *pInputStream, CStdString &error)
+{
+  // Try to open the AirTunes demuxer
+  if (pInputStream->IsStreamType(DVDSTREAM_TYPE_FILE) && pInputStream->GetContent().compare("audio/x-xbmc-pcm") == 0 )
+  {
+    // audio/x-xbmc-pcm this is the used codec for AirTunes
+    // (apples audio only streaming)
+    auto_ptr<CDVDDemuxBXA> demuxer(new CDVDDemuxBXA());
+    if(demuxer->Open(pInputStream))
+      return demuxer.release();
+    else
+      return NULL;
+  }
 
+  auto_ptr<CDVDDemuxFFmpeg> demuxer(new CDVDDemuxFFmpeg());
+  if(demuxer->Open(pInputStream))
+    return demuxer.release();
+  else
+  {
+    /* PLEX */
+    error = demuxer->GetError();
+    /* END PLEX */
+    return NULL;
+  }
+}
+#endif

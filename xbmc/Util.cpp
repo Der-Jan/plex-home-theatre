@@ -1034,7 +1034,11 @@ CStdString CUtil::ValidatePath(const CStdString &path, bool bFixDoubleSlashes /*
 
 bool CUtil::IsUsingTTFSubtitles()
 {
+#ifndef __PLEX__
   return URIUtils::GetExtension(g_guiSettings.GetString("subtitles.font")).Equals(".ttf");
+#else
+  return true;
+#endif
 }
 
 #ifdef UNIT_TESTING
@@ -1081,7 +1085,12 @@ void CUtil::SplitExecFunction(const CStdString &execString, CStdString &function
 
   // remove any whitespace, and the standard prefix (if it exists)
   function.Trim();
+#ifndef __PLEX__
   if( function.Left(5).Equals("xbmc.", false) )
+#else
+  if( function.Left(5).Equals("plex.", false) ||
+      function.Left(5).Equals("xbmc.", false))
+#endif
     function.Delete(0, 5);
 
   SplitParams(paramString, parameters);
@@ -1632,6 +1641,15 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
   int n = 0;
   if (child == 0)
   {
+    if (!waitExit)
+    {
+      // fork again in order not to leave a zombie process
+      child = fork();
+      if (child == -1)
+        _exit(2);
+      else if (child != 0)
+        _exit(0);
+    }
     close(0);
     close(1);
     close(2);
@@ -1646,7 +1664,7 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
   }
   else
   {
-    if (waitExit) waitpid(child, &n, 0);
+    waitpid(child, &n, 0);
   }
 
   return (waitExit) ? (WEXITSTATUS(n) == 0) : true;
@@ -1945,6 +1963,7 @@ void CUtil::ScanForExternalSubtitles(const CStdString& strMovie, std::vector<CSt
     for (int j=0; common_sub_dirs[j]; j++)
     {
       CStdString strPath2 = URIUtils::AddFileToFolder(strLookInPaths[i],common_sub_dirs[j]);
+      URIUtils::AddSlashAtEnd(strPath2);
       if (CDirectory::Exists(strPath2))
         strLookInPaths.push_back(strPath2);
     }

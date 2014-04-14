@@ -11,13 +11,12 @@ SUBDIRS := \
 	openssl libssh libssh2 librtmp curl \
 	libjpeg-turbo tiff libpng libogg \
 	libvorbis libflac libmp3lame libmad fribidi libmpeg2 \
-	libass libcdio libsamplerate libcrystalhd libnfs \
+	libass libcdio libsamplerate libcrystalhd \
 	libGLEW libsdl libsdl_mixer libsdl_image \
 	libmicrohttpd libmodplug libbluray libyajl libffi \
-	libgpg-error libgcrypt afpfs-ng \
+	libgpg-error libgcrypt \
 	libplist libshairport libcec tinyxml \
-        samba python26 distribute distutilscross \
-	mysqlclient boost taglib xbmc-pvr-addons \
+    boost breakpad
 
 ifeq ($(DARWIN), ios)
   EXCLUDED = libcec libcrystalhd libGLEW libsdl libsdl_mixer libsdl_image

@@ -444,6 +444,12 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
         {
           for (int i=0;i<items.Size();++i)
             pSlideShow->Add(items[i].get());
+
+          /* PLEX */
+          if (pMsg->params.size() > 0)
+            pSlideShow->Select(pMsg->params[0]);
+          /* END PLEX */
+
           pSlideShow->StartSlideShow(); //Start the slideshow!
         }
 
@@ -689,6 +695,7 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
       }
       break;
 
+#ifdef HAS_PYTHON // Plex:: we don't build with Python so make sure this is not called.
     case TMSG_GUI_PYTHON_DIALOG:
       {
         // This hack is not much better but at least I don't need to make ApplicationMessenger
@@ -697,6 +704,7 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
         ((CGUIWindow*)pMsg->lpVoid)->OnAction(caction);
       }
       break;
+#endif
 
     case TMSG_GUI_ACTION:
       {
@@ -805,6 +813,20 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
       CGUIWindowLoginScreen::LoadProfile(pMsg->dwParam1);
       break;
     }
+
+    /* PLEX */
+    case TMSG_MEDIA_RESTART_WITH_NEW_PLAYER:
+      {
+        g_application.RestartWithNewPlayer((CGUIDialogCache* )pMsg->lpVoid, pMsg->strParam);
+      }
+      break;
+    case TMSG_HIDE:
+      {
+        g_application.Hide();
+      }
+      break;
+    /* END PLEX */
+
   }
 }
 
@@ -1052,6 +1074,18 @@ void CApplicationMessenger::PictureSlideShow(string pathname, bool addTBN /* = f
   SendMessage(tMsg);
 }
 
+/* PLEX */
+void CApplicationMessenger::PictureSlideShow(string pathname, bool addTBN, const string& index)
+{
+  DWORD dwMessage = TMSG_PICTURE_SLIDESHOW;
+  ThreadMessage tMsg = {dwMessage};
+  tMsg.strParam = pathname;
+  tMsg.dwParam1 = addTBN ? 1 : 0;
+  tMsg.params.push_back(index);
+  SendMessage(tMsg);
+}
+/* END PLEX */
+
 void CApplicationMessenger::SetGUILanguage(const std::string &strLanguage)
 {
   ThreadMessage tMsg = {TMSG_SETLANGUAGE};
@@ -1134,13 +1168,13 @@ void CApplicationMessenger::Minimize(bool wait)
   SendMessage(tMsg, wait);
 }
 
-void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CStdString &param)
+void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CStdString &param, /* PLEX */ bool wait /*END PLEX */)
 {
   ThreadMessage tMsg = {TMSG_GUI_DO_MODAL};
   tMsg.lpVoid = pDialog;
   tMsg.dwParam1 = (DWORD)iWindowID;
   tMsg.strParam = param;
-  SendMessage(tMsg, true);
+  SendMessage(tMsg, wait /* PLEX */);
 }
 
 void CApplicationMessenger::ExecOS(const CStdString command, bool waitExit)
@@ -1290,3 +1324,19 @@ void CApplicationMessenger::LoadProfile(unsigned int idx)
   tMsg.dwParam1 = idx;
   SendMessage(tMsg, false);
 }
+
+/* PLEX */
+void CApplicationMessenger::RestartWithNewPlayer(CGUIDialogCache* dlg, const std::string& newURL)
+{
+  ThreadMessage tMsg = {TMSG_MEDIA_RESTART_WITH_NEW_PLAYER};
+  tMsg.strParam = newURL;
+  tMsg.lpVoid = dlg;
+  SendMessage(tMsg, false);
+}
+
+void CApplicationMessenger::Hide()
+{
+  ThreadMessage tMsg = {TMSG_HIDE};
+  SendMessage(tMsg, true);
+}
+/* END PLEX */

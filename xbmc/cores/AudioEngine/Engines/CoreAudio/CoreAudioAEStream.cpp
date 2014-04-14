@@ -106,7 +106,8 @@ CCoreAudioAEStream::CCoreAudioAEStream(enum AEDataFormat dataFormat, unsigned in
   m_fadeRunning     (false),
   m_frameSize       (0    ),
   m_doRemap         (true ),
-  m_firstInput      (true )
+  m_firstInput      (true ),
+  m_flushRequested  (false)
 {
   m_ssrcData.data_out             = NULL;
 
@@ -148,6 +149,9 @@ CCoreAudioAEStream::~CCoreAudioAEStream()
   //_aligned_free(m_resampleBuffer); m_resampleBuffer = NULL;
   _aligned_free(m_remapBuffer); m_remapBuffer = NULL;
   _aligned_free(m_vizRemapBuffer); m_vizRemapBuffer = NULL;
+  /* PLEX */
+  _aligned_free(m_upmixBuffer); m_upmixBuffer = NULL;
+  /* END PLEX */
 
   delete m_Buffer; m_Buffer = NULL;
 
@@ -331,7 +335,7 @@ unsigned int CCoreAudioAEStream::AddData(void *data, unsigned int size)
   unsigned int addsize  = size;
   unsigned int channelsInBuffer = m_chLayoutCountStream;
 
-  if (!m_valid || size == 0 || data == NULL || !m_Buffer)
+  if (!m_valid || size == 0 || data == NULL || !m_Buffer || m_flushRequested)
     return 0;
 
   // if the stream is draining
@@ -439,11 +443,25 @@ unsigned int CCoreAudioAEStream::AddData(void *data, unsigned int size)
   return size;
 }
 
+// this is only called on the context of the coreaudio thread!
 unsigned int CCoreAudioAEStream::GetFrames(uint8_t *buffer, unsigned int size)
 {
+  /* PLEX - added the last condition where we check that m_flushRequested is not set. */
   // if we have been deleted
-  if (!m_valid || m_delete || !m_Buffer || m_paused)
+  if (!m_valid || m_delete || !m_Buffer || (m_paused && !m_flushRequested))
     return 0;
+  
+  if (m_flushRequested)
+  {
+    InternalFlush();
+    return 0;
+  }
+
+  if (m_flushRequested)
+  {
+    InternalFlush();
+    return 0;
+  }
 
   unsigned int readsize = std::min(m_Buffer->GetReadSize(), size);
   m_Buffer->Read(buffer, readsize);
@@ -611,7 +629,8 @@ bool CCoreAudioAEStream::IsDrained()
 
 void CCoreAudioAEStream::Flush()
 {
-  InternalFlush();
+  if (m_Buffer)
+    m_flushRequested = true;
 }
 
 float CCoreAudioAEStream::GetVolume()
@@ -664,6 +683,7 @@ void CCoreAudioAEStream::InternalFlush()
     }
   }
 
+  m_flushRequested = false;
   //if (m_Buffer)
   //  m_Buffer->Reset();
 }
@@ -767,7 +787,8 @@ OSStatus CCoreAudioAEStream::OnRender(AudioUnitRenderActionFlags *ioActionFlags,
   const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
 {
   // if we have no valid data output silence
-  if (!m_valid || m_delete || !m_Buffer || m_firstInput || m_paused)
+  /* PLEX - added the last condition where we check that m_flushRequested is not set. */
+  if (!m_valid || m_delete || !m_Buffer || m_firstInput || (m_paused && !m_flushRequested))
   {
   	for (UInt32 i = 0; i < ioData->mNumberBuffers; i++)
       bzero(ioData->mBuffers[i].mData, ioData->mBuffers[i].mDataByteSize);

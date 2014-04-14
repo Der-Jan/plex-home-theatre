@@ -445,6 +445,13 @@ void CGUIWindowManager::CloseDialogs(bool forceClose)
 bool CGUIWindowManager::OnAction(const CAction &action)
 {
   CSingleLock lock(g_graphicsContext);
+
+  /* PLEX */
+  // allow  all window manager actions to reset screensaver timeout.
+  // so that events comming from httpremotehandlker can also reset it
+  g_application.ResetScreenSaver();
+  /* END PLEX */
+
   unsigned int topMost = m_activeDialogs.size();
   while (topMost)
   {
@@ -495,24 +502,26 @@ void CGUIWindowManager::Process(unsigned int currentTime)
   CSingleLock lock(g_graphicsContext);
 
   CDirtyRegionList dirtyregions;
-
-  CGUIWindow* pWindow = GetWindow(GetActiveWindow());
-  if (pWindow)
-    pWindow->DoProcess(currentTime, dirtyregions);
-
-  // process all dialogs - visibility may change etc.
-  for (WindowMap::iterator it = m_mapWindows.begin(); it != m_mapWindows.end(); it++)
-  {
-    CGUIWindow *pWindow = (*it).second;
-    if (pWindow && pWindow->IsDialog())
-      pWindow->DoProcess(currentTime, dirtyregions);
-  }
-
+  /* PLEX move this if statement */
   if (g_application.m_AppActive)
   {
+
+    CGUIWindow* pWindow = GetWindow(GetActiveWindow());
+    if (pWindow)
+      pWindow->DoProcess(currentTime, dirtyregions);
+
+    // process all dialogs - visibility may change etc.
+    for (WindowMap::iterator it = m_mapWindows.begin(); it != m_mapWindows.end(); it++)
+    {
+      CGUIWindow *pWindow = (*it).second;
+      if (pWindow && pWindow->IsDialog())
+        pWindow->DoProcess(currentTime, dirtyregions);
+    }
+
     for (CDirtyRegionList::iterator itr = dirtyregions.begin(); itr != dirtyregions.end(); itr++)
       m_tracker.MarkDirtyRegion(*itr);
   }
+  /* END PLEX */
 }
 
 void CGUIWindowManager::MarkDirty()
@@ -527,6 +536,11 @@ void CGUIWindowManager::MarkDirty(const CRect& rect)
 
 void CGUIWindowManager::RenderPass()
 {
+  /* PLEX - No need to render when the App is not active */
+  if (!g_application.m_AppActive)
+    return;
+  /* END PLEX */
+
   CGUIWindow* pWindow = GetWindow(GetActiveWindow());
   if (pWindow)
   {
@@ -768,6 +782,33 @@ int CGUIWindowManager::GetTopMostModalDialogID(bool ignoreClosing /*= false*/) c
   }
   return WINDOW_INVALID;
 }
+
+/* PLEX */
+int CGUIWindowManager::RemoveThreadMessageByMessageIds(int *pMessageIDList)
+{
+  CSingleLock lock(m_critSection);
+  int removedMsgCount = 0;
+  for (std::vector < std::pair<CGUIMessage*,int> >::iterator it = m_vecThreadMessages.begin(); it != m_vecThreadMessages.end();)
+  {
+    CGUIMessage *pMsg = it->first;
+    int *pMsgID;
+    for(pMsgID = pMessageIDList; *pMsgID != 0; ++pMsgID)
+      if (pMsg->GetMessage() == *pMsgID)
+        break;
+    if (*pMsgID)
+    {
+      it = m_vecThreadMessages.erase(it);
+      delete pMsg;
+      ++removedMsgCount;
+    }
+    else
+    {
+      ++it;
+    }
+  }
+  return removedMsgCount;
+}
+/* END PLEX */
 
 void CGUIWindowManager::SendThreadMessage(CGUIMessage& message)
 {

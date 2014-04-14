@@ -28,6 +28,12 @@
 #include "XBDateTime.h"
 #include "utils/md5.h"
 
+/* PLEX */
+#include "PlexApplication.h"
+#include "Client/PlexTimelineManager.h"
+#include "StringUtils.h"
+/* END PLEX */
+
 #if defined(TARGET_DARWIN)
 #include "osx/CocoaInterface.h"
 #endif
@@ -64,6 +70,9 @@ void CGUIEditControl::DefaultConstructor()
   m_label.SetAlign(m_label.GetLabelInfo().align & XBFONT_CENTER_Y); // left align
   m_label2.GetLabelInfo().offsetX = 0;
   m_isMD5 = false;
+  /* PLEX */
+  m_caps = false;
+  /* END PLEX */
 }
 
 CGUIEditControl::CGUIEditControl(const CGUIButtonControl &button)
@@ -74,6 +83,10 @@ CGUIEditControl::CGUIEditControl(const CGUIButtonControl &button)
 
 CGUIEditControl::~CGUIEditControl(void)
 {
+  /* PLEX */
+  if (g_plexApplication.timelineManager)
+    g_plexApplication.timelineManager->SetTextFieldFocused(false);
+  /* END PLEX */
 }
 
 bool CGUIEditControl::OnMessage(CGUIMessage &message)
@@ -92,6 +105,15 @@ bool CGUIEditControl::OnMessage(CGUIMessage &message)
            message.GetMessage() == GUI_MSG_LOSTFOCUS)
   {
     m_smsTimer.Stop();
+
+    /* PLEX */
+    CStdString name = "field";
+    if (GetDescription().size() > 0)
+      name = GetDescription();
+
+    if (g_plexApplication.timelineManager)
+      g_plexApplication.timelineManager->SetTextFieldFocused(message.GetMessage() == GUI_MSG_SETFOCUS, name, GetLabel2(), m_inputType == INPUT_TYPE_PASSWORD);
+    /* END PLEX */
   }
   else if (message.GetMessage() == GUI_MSG_SET_TEXT &&
           ((message.GetControlId() <= 0 && HasFocus()) || (message.GetControlId() == GetID())))
@@ -333,9 +355,17 @@ void CGUIEditControl::UpdateText(bool sendUpdate)
   if (sendUpdate)
   {
     SEND_CLICK_MESSAGE(GetID(), GetParentID(), 0);
-
     m_textChangeActions.ExecuteActions(GetID(), GetParentID());
   }
+
+  /* PLEX */
+  if (m_caps)
+    m_text2.ToUpper();
+
+  if (g_plexApplication.timelineManager)
+    g_plexApplication.timelineManager->SetTextFieldFocused(true, GetDescription().size() > 0 ? GetDescription() : "field", GetLabel2(), m_inputType == INPUT_TYPE_PASSWORD);
+  /* END PLEX */
+
   SetInvalid();
 }
 

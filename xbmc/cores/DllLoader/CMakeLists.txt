@@ -1,0 +1,13 @@
+add_subdirectory(exports)
+
+find_all_sources(. dllloader_SRCS)
+list(REMOVE_ITEM dllloader_SRCS ./DllLoader-linux.cpp)
+if(UNIX)
+  list(REMOVE_ITEM dllloader_SRCS ./Win32DllLoader.cpp)
+else()
+  list(REMOVE_ITEM dllloader_SRCS ./DllLoader-linux.cpp)
+  list(REMOVE_ITEM dllloader_SRCS ./ldt_keeper.c)
+  list(REMOVE_ITEM dllloader_SRCS ./mmap_anon.c)
+  list(REMOVE_ITEM dllloader_SRCS ./SoLoader.cpp)
+endif()
+add_sources(${dllloader_SRCS})

@@ -72,6 +72,10 @@ public:
   virtual void SeekTime(int64_t iTime = 0);
   virtual bool SkipNext();
 
+  /* PLEX */
+  virtual void FadeOut(int milliseconds);
+  /* END PLEX */
+
   static bool HandlesType(const CStdString &type);
 
   struct
@@ -153,5 +157,14 @@ private:
   void UpdateStreamInfoPlayNextAtFrame(StreamInfo *si, unsigned int crossFadingTime);
   void UpdateGUIData(StreamInfo *si);
   int64_t GetTimeInternal();
+
+  /* PLEX */
+  unsigned int m_hardCrossFade;
+
+  float m_userRequestedVolume;
+  float GetMaxVolume();
+
+  /* END PLEX */
+
 };
 

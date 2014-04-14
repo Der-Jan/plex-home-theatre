@@ -138,11 +138,7 @@ bool CRenderSystemGLES::ResetRenderSystem(int width, int height, bool fullScreen
   g_matrices.MatrixMode(MM_PROJECTION);
   g_matrices.LoadIdentity();
 
-#ifdef TARGET_RASPBERRY_PI
-  g_matrices.Ortho(0.0f, width-1, height-1, 0.0f, +1.0f, 1.0f);
-#else
   g_matrices.Ortho(0.0f, width-1, height-1, 0.0f, -1.0f, 1.0f);
-#endif
 
   g_matrices.MatrixMode(MM_MODELVIEW);
   g_matrices.LoadIdentity();
@@ -376,7 +372,9 @@ void CRenderSystemGLES::ApplyStateBlock()
   glActiveTexture(GL_TEXTURE0);
   glEnable(GL_BLEND);
   glEnable(GL_SCISSOR_TEST);  
+#ifndef __PLEX__
   glClear(GL_DEPTH_BUFFER_BIT);
+#endif
 }
 
 void CRenderSystemGLES::SetCameraPosition(const CPoint &camera, int screenWidth, int screenHeight)

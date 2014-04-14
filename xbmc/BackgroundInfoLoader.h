@@ -73,4 +73,3 @@ protected:
 
   std::vector<CThread *> m_workers;
 };
-

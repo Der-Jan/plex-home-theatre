@@ -237,7 +237,10 @@ void CJobManager::CancelJob(unsigned int jobID)
   // or if we're processing it
   Processing::iterator it = find(m_processing.begin(), m_processing.end(), jobID);
   if (it != m_processing.end())
+  {
+    /* PLEX */ it->Cancel(); /* END PLEX */
     it->m_callback = NULL; // job is in progress, so only thing to do is to remove callback
+  }
 }
 
 void CJobManager::StartWorkers(CJob::PRIORITY priority)
@@ -427,6 +430,10 @@ void CJobManager::RemoveWorker(const CJobWorker *worker)
 
 unsigned int CJobManager::GetMaxWorkers(CJob::PRIORITY priority) const
 {
+#ifndef __PLEX__
   static const unsigned int max_workers = 5;
+#else
+  static const unsigned int max_workers = 10;
+#endif
   return max_workers - (CJob::PRIORITY_HIGH - priority);
 }

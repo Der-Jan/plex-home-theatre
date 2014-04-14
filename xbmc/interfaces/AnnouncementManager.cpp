@@ -120,7 +120,11 @@ void CAnnouncementManager::Announce(AnnouncementFlag flag, const char *sender, c
       CVideoDatabase videodatabase;
       if (videodatabase.Open())
       {
-        if (videodatabase.LoadVideoInfo(item->GetPath(), *item->GetVideoInfoTag()))
+        CStdString path = item->GetPath();
+        CStdString videoInfoTagPath(item->GetVideoInfoTag()->m_strFileNameAndPath);
+        if (videoInfoTagPath.Find("removable://") == 0)
+          path = videoInfoTagPath;
+        if (videodatabase.LoadVideoInfo(path, *item->GetVideoInfoTag()))
           id = item->GetVideoInfoTag()->m_iDbId;
 
         videodatabase.Close();
@@ -190,7 +194,10 @@ void CAnnouncementManager::Announce(AnnouncementFlag flag, const char *sender, c
       // TODO: Can be removed once this is properly handled when starting playback of a file
       item->SetProperty(LOOKUP_PROPERTY, false);
 
-      object["item"]["title"] = item->GetMusicInfoTag()->GetTitle();
+      CStdString title = item->GetMusicInfoTag()->GetTitle();
+      if (title.IsEmpty())
+        title = item->GetLabel();
+      object["item"]["title"] = title;
 
       if (item->GetMusicInfoTag()->GetTrackNumber() > 0)
         object["item"]["track"] = item->GetMusicInfoTag()->GetTrackNumber();

@@ -24,6 +24,12 @@
 #include "utils/log.h"
 #include "utils/URIUtils.h"
 
+/* PLEX */
+#include "AdvancedSettings.h"
+#include "GUISettings.h"
+#include "Variant.h"
+/* END PLEX */
+
 using namespace XFILE;
 
 CDVDInputStreamFile::CDVDInputStreamFile() : CDVDInputStream(DVDSTREAM_TYPE_FILE)
@@ -51,8 +57,43 @@ bool CDVDInputStreamFile::Open(const char* strFile, const std::string& content)
   if (!m_pFile)
     return false;
 
+  /* PLEX */
+  unsigned int fileCacheSize = 0;
+  if (m_item.IsPlexMediaServerLibrary() &&
+      m_item.m_selectedMediaPart &&
+      m_item.m_selectedMediaPart->HasProperty("size"))
+  {
+    CLog::Log(LOGDEBUG, "Cache selector: going to use cacheSize based on fileSize");
+    uint64_t fileSize = m_item.m_selectedMediaPart->GetProperty("size").asUnsignedInteger();
+    float percent = g_guiSettings.GetInt("cache.percent") / 100.0;
+    uint64_t cacheSize = fileSize * percent;
+
+    /* We need to resize the cache */
+    cacheSize = std::min(cacheSize, (uint64_t)g_advancedSettings.m_smartCacheUpperLimit);
+    fileCacheSize = cacheSize;
+    CLog::Log(LOGDEBUG, "Cache selector: selected cacheSize: %lld", cacheSize);
+  }
+  else if (m_item.IsInternetStream()) // Internet video?
+  {
+    /* FIXME: selectedQuality never ends up here */
+    unsigned int cacheSize = 1024 * 1024 * 50;
+    CStdString selectedQuality = m_item.GetProperty("selectedQuality").asString();
+    if (!selectedQuality.empty())
+    {
+      if (selectedQuality.Equals("1080p"))
+        cacheSize = 1024 * 1024 * 100;
+      if (selectedQuality.Equals("720p"))
+        cacheSize = 1024 * 1024 * 70;
+      else
+        cacheSize = 1024 * 1024 * 50;
+    }
+
+    fileCacheSize = std::min(cacheSize, g_advancedSettings.m_smartCacheUpperLimit);
+  }
+  /* END PLEX */
+
   // open file in binary mode
-  if (!m_pFile->Open(strFile, READ_TRUNCATED | READ_BITRATE | READ_CHUNKED))
+  if (!m_pFile->Open(strFile, READ_TRUNCATED | READ_BITRATE | READ_CHUNKED | READ_CACHED, fileCacheSize)) // PLEX - added arguments here
   {
     delete m_pFile;
     m_pFile = NULL;

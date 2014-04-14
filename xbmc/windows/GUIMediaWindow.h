@@ -27,6 +27,15 @@
 #include "dialogs/GUIDialogContextMenu.h"
 #include "playlists/SmartPlayList.h"
 
+/* PLEX */
+#include "BackgroundInfoLoader.h"
+#include "FileItem.h"
+#include "Client/PlexMediaServerClient.h"
+
+#define CONTENT_LIST_FILTERS 13000
+#define DEFAULT_MODE_FOR_DISABLED_VIEWS 65586
+/* END PLEX */
+
 class CFileItemList;
 
 // base class for all media windows
@@ -47,6 +56,10 @@ public:
   virtual bool HasListItems() const { return true; };
   virtual CFileItemPtr GetCurrentListItem(int offset = 0);
   const CGUIViewState *GetViewState() const;
+
+  /* PLEX */
+  virtual void CheckPlexFilters(CFileItemList& list) {};
+  /* END PLEX */
 
   virtual bool CanFilterAdvanced() { return m_canFilterAdvanced; }
   virtual bool IsFiltered();
@@ -139,6 +152,11 @@ protected:
   void UpdateFileList();
   virtual void OnDeleteItem(int iItem);
   void OnRenameItem(int iItem);
+
+  /* PLEX */
+  virtual CBackgroundInfoLoader* GetBackgroundLoader() { return 0; }
+  CFileItemPtr m_updatedItem;
+  /* END PLEX */
 
 protected:
   bool WaitForNetwork() const;

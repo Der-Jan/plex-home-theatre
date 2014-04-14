@@ -313,6 +313,14 @@ void CAddonInstaller::InstallFromXBMCRepo(const set<CStdString> &addonIDs)
 
 bool CAddonInstaller::CheckDependencies(const AddonPtr &addon)
 {
+  std::vector<std::string> preDeps;
+  preDeps.push_back(addon->ID());
+  return CheckDependencies(addon, preDeps);
+}
+
+bool CAddonInstaller::CheckDependencies(const AddonPtr &addon,
+                                        std::vector<std::string>& preDeps)
+{
   if (!addon.get())
     return true; // a NULL addon has no dependencies
   ADDONDEPS deps = addon->GetDeps();
@@ -333,22 +341,21 @@ bool CAddonInstaller::CheckDependencies(const AddonPtr &addon)
         return false;
       }
     }
-    // prevent infinite loops
-    if (dep && dep->ID() == addon->ID())
-    {
-      CLog::Log(LOGERROR, "Addon %s depends on itself, ignoring", addon->ID().c_str());
-      return false;
-    }
     // at this point we have our dep, or the dep is optional (and we don't have it) so check that it's OK as well
     // TODO: should we assume that installed deps are OK?
-    if (dep && !CheckDependencies(dep))
-      return false;
+    if (dep && std::find(preDeps.begin(), preDeps.end(), dep->ID()) == preDeps.end())
+    {
+      if (!CheckDependencies(dep, preDeps))
+        return false;
+      preDeps.push_back(dep->ID());
+    }
   }
   return true;
 }
 
 void CAddonInstaller::UpdateRepos(bool force, bool wait)
 {
+#ifndef __PLEX__
   CSingleLock lock(m_critSection);
   if (m_repoUpdateJob)
   {
@@ -386,6 +393,7 @@ void CAddonInstaller::UpdateRepos(bool force, bool wait)
       return;
     }
   }
+#endif
 }
 
 bool CAddonInstaller::HasJob(const CStdString& ID) const
@@ -556,10 +564,18 @@ bool CAddonInstallJob::OnPreInstall()
 
   if (m_addon->Type() == ADDON_SERVICE)
   {
-    boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(m_addon);
+    CAddonDatabase database;
+    database.Open();
+    bool running = !database.IsAddonDisabled(m_addon->ID()); //grab a current state
+    database.DisableAddon(m_addon->ID(),false); // enable it so we can remove it??
+    // regrab from manager to have the correct path set
+    AddonPtr addon;
+    ADDON::CAddonMgr::Get().GetAddon(m_addon->ID(), addon);
+    boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(addon);
     if (service)
       service->Stop();
-    return true;
+    CAddonMgr::Get().RemoveAddon(m_addon->ID()); // remove it
+    return running;
   }
 
   if (m_addon->Type() == ADDON_PVRDLL)
@@ -667,12 +683,18 @@ void CAddonInstallJob::OnPostInstall(bool reloadAddon)
 
   if (m_addon->Type() == ADDON_SERVICE)
   {
-    // regrab from manager to have the correct path set
-    AddonPtr addon; 
-    CAddonMgr::Get().GetAddon(m_addon->ID(), addon);
-    boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(addon);
-    if (service)
-      service->Start();
+    CAddonDatabase database;
+    database.Open();
+    database.DisableAddon(m_addon->ID(),!reloadAddon); //return it into state it was before OnPreInstall()
+    if (reloadAddon) // reload/start it if it was running
+    {
+      // regrab from manager to have the correct path set
+      AddonPtr addon; 
+      CAddonMgr::Get().GetAddon(m_addon->ID(), addon);
+      boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(addon);
+      if (service)
+        service->Start();
+    }
   }
 
   if (m_addon->Type() == ADDON_REPOSITORY)
@@ -746,7 +768,12 @@ bool CAddonUnInstallJob::DoWork()
     // stop the pvr manager, so running pvr add-ons are stopped and closed
     PVR::CPVRManager::Get().Stop();
   }
-
+  if (m_addon->Type() == ADDON_SERVICE)
+  {
+    boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(m_addon);
+    if (service)
+      service->Stop();
+  }
   if (!CAddonInstallJob::DeleteAddon(m_addon->Path()))
     return false;
 

@@ -30,13 +30,17 @@
 #if defined(HAS_SKIN_TOUCHED) && defined(TARGET_DARWIN_IOS) && !defined(TARGET_DARWIN_IOS_ATV2)
 #define DEFAULT_SKIN          "skin.touched"
 #else
-#define DEFAULT_SKIN          "skin.confluence"
+#define DEFAULT_SKIN          "skin.plex"
 #endif
 #define DEFAULT_WEB_INTERFACE "webinterface.default"
-#ifdef MID
+/* PLEX */
+#if defined( MID ) || defined(TARGET_RASPBERRY_PI)
+/* PLEX */
 #define DEFAULT_VSYNC       VSYNC_DISABLED
 #else  // MID
-#if defined(TARGET_DARWIN) || defined(_WIN32)
+/* PLEX */
+#if defined(TARGET_DARWIN) || defined(_WIN32) 
+/* PLEX */
 #define DEFAULT_VSYNC       VSYNC_ALWAYS
 #else
 #define DEFAULT_VSYNC       VSYNC_DRIVER
@@ -378,8 +382,15 @@ public:
   bool GetString(const TiXmlElement* pRootElement, const char *strTagName, char *szValue, const CStdString& strDefaultValue);
   bool GetSource(const CStdString &category, const TiXmlNode *source, CMediaSource &share);
 
+  /* PLEX */
+  CStdString GetPlexMediaServerThumbFolder() const;
+  CStdString GetPlexMediaServerFanartFolder() const;
+  CStdString GetProgramFanartFolder() const;
+  /* END PLEX */
+
   void ApplyCalibrations();
   void UpdateCalibrations();
+
 protected:
   void GetSources(const TiXmlElement* pRootElement, const CStdString& strTagName, VECSOURCES& items, CStdString& strDefault);
   bool SetSources(TiXmlNode *root, const char *section, const VECSOURCES &shares, const char *defaultPath);

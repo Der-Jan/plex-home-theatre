@@ -59,7 +59,11 @@ PAPlayer::PAPlayer(IPlayerCallback& callback) :
   m_upcomingCrossfadeMS(0),
   m_currentStream      (NULL ),
   m_audioCallback      (NULL ),
-  m_FileItem           (new CFileItem())
+  m_FileItem           (new CFileItem()),
+  m_userRequestedVolume(-1),
+/* PLEX */
+  m_hardCrossFade(0)
+/* END PLEX */
 {
   memset(&m_playerGUIData, 0, sizeof(m_playerGUIData));
 }
@@ -96,7 +100,8 @@ void PAPlayer::SoftStart(bool wait/* = false */)
     if (si->m_fadeOutTriggered)
       continue;
 
-    si->m_stream->FadeVolume(0.0f, 1.0f, FAST_XFADE_TIME);
+    // PLEX 1.0 -> Getmax
+    si->m_stream->FadeVolume(0.0f, GetMaxVolume(), FAST_XFADE_TIME);
     si->m_stream->Resume();
   }
   
@@ -131,11 +136,16 @@ void PAPlayer::SoftStop(bool wait/* = false */, bool close/* = true */)
 {
   /* fade all the streams out fast for a nice soft stop */
   CSharedLock lock(m_streamsLock);
+  /* PLEX */
+  int xfadeTime = FAST_XFADE_TIME;
+  if (m_hardCrossFade) xfadeTime = m_hardCrossFade;
+  /* END PLEX */
   for(StreamList::iterator itt = m_streams.begin(); itt != m_streams.end(); ++itt)
   {
     StreamInfo* si = *itt;
     if (si->m_stream)
-      si->m_stream->FadeVolume(1.0f, 0.0f, FAST_XFADE_TIME);
+      // PLEX 1.0 -> Getmax
+      si->m_stream->FadeVolume(GetMaxVolume(), 0.0f, xfadeTime);
 
     if (close)
     {
@@ -150,7 +160,7 @@ void PAPlayer::SoftStop(bool wait/* = false */, bool close/* = true */)
   {
     /* wait for them to fade out */
     lock.Leave();
-    Sleep(FAST_XFADE_TIME);
+    Sleep(xfadeTime);
     lock.Enter();
 
     /* be sure they have faded out */
@@ -244,6 +254,11 @@ bool PAPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &options)
   if (m_streams.size() == 2)
   {
     //do a short crossfade on trackskip, set to max 2 seconds for these prev/next transitions
+    /* PLEX */
+    if (m_hardCrossFade)
+      m_upcomingCrossfadeMS = m_hardCrossFade;
+    else
+    /* END PLEX */
     m_upcomingCrossfadeMS = std::min(m_defaultCrossfadeMS, (unsigned int)MAX_SKIP_XFADE_TIME);
 
     //start transition to next track
@@ -264,6 +279,14 @@ bool PAPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &options)
 
 void PAPlayer::UpdateCrossfadeTime(const CFileItem& file)
 {
+  /* PLEX */
+  if (m_hardCrossFade)
+  {
+    m_upcomingCrossfadeMS = m_defaultCrossfadeMS = m_hardCrossFade;
+    return;
+  }
+  /* END PLEX */
+
   m_upcomingCrossfadeMS = m_defaultCrossfadeMS = g_guiSettings.GetInt("musicplayer.crossfade") * 1000;
   if (m_upcomingCrossfadeMS)
   {
@@ -337,7 +360,9 @@ bool PAPlayer::QueueNextFileEx(const CFileItem &file, bool fadeIn/* = true */)
   si->m_seekNextAtFrame    = 0;
   si->m_seekFrame          = -1;
   si->m_stream             = NULL;
-  si->m_volume             = (fadeIn && m_upcomingCrossfadeMS) ? 0.0f : 1.0f;
+  /* PLEX */
+  si->m_volume           = (fadeIn && m_upcomingCrossfadeMS) ? 0.0f : GetMaxVolume();
+  /* END PLEX */
   si->m_fadeOutTriggered   = false;
   si->m_isSlaved           = false;
 
@@ -354,7 +379,15 @@ bool PAPlayer::QueueNextFileEx(const CFileItem &file, bool fadeIn/* = true */)
   si->m_playNextAtFrame = 0;
   si->m_playNextTriggered = false;
 
-  PrepareStream(si);
+  if (!PrepareStream(si))
+  {
+    CLog::Log(LOGINFO, "PAPlayer::QueueNextFileEx - Error preparing stream");
+    
+    si->m_decoder.Destroy();
+    delete si;
+    m_callback.OnQueueNextItem();
+    return false;
+  }
 
   /* add the stream to the list */
   CExclusiveLock lock(m_streamsLock);
@@ -584,7 +617,8 @@ inline void PAPlayer::ProcessStreams(double &delay, double &buffer)
       {
         if (m_upcomingCrossfadeMS)
         {
-          si->m_stream->FadeVolume(1.0f, 0.0f, m_upcomingCrossfadeMS);
+          // PLEX 1.0 -> Getmax
+          si->m_stream->FadeVolume(GetMaxVolume(), 0.0f, m_upcomingCrossfadeMS);
           si->m_fadeOutTriggered = true;
         }
         m_currentStream = NULL;
@@ -607,7 +641,8 @@ inline bool PAPlayer::ProcessStream(StreamInfo *si, double &delay, double &buffe
     si->m_stream->RegisterAudioCallback(m_audioCallback);
     if (!si->m_isSlaved)
       si->m_stream->Resume();
-    si->m_stream->FadeVolume(0.0f, 1.0f, m_upcomingCrossfadeMS);
+    // PLEX 1.0 -> Getmax
+    si->m_stream->FadeVolume(0.0f, GetMaxVolume(), m_upcomingCrossfadeMS ? m_upcomingCrossfadeMS : FAST_XFADE_TIME);
     m_callback.OnPlayBackStarted();
   }
 
@@ -753,7 +788,9 @@ void PAPlayer::Pause()
 
 void PAPlayer::SetVolume(float volume)
 {
-
+  /* PLEX */
+  m_userRequestedVolume = volume;
+  /* PLEX */
 }
 
 void PAPlayer::SetDynamicRangeCompression(long drc)
@@ -777,6 +814,10 @@ int64_t PAPlayer::GetTimeInternal()
   if (m_currentStream->m_stream)
     time -= m_currentStream->m_stream->GetDelay();
   time = time * 1000.0;
+
+  /* PLEX */
+  time += m_currentStream->m_startOffset;
+  /* END PLEX */
 
   m_playerGUIData.m_time = (int64_t)time; //update for GUI
 
@@ -930,3 +971,18 @@ void PAPlayer::UpdateGUIData(StreamInfo *si)
   total -= m_currentStream->m_startOffset;
   m_playerGUIData.m_totalTime = total;
 }
+
+/* PLEX */
+float PAPlayer::GetMaxVolume()
+{
+  if (m_userRequestedVolume > 0.0)
+    return m_userRequestedVolume;
+  else
+    return 1.0f;
+}
+
+void PAPlayer::FadeOut(int milliseconds)
+{
+  m_hardCrossFade = milliseconds;
+}
+/* END PLEX */

@@ -19,10 +19,10 @@
  */
 
 #include "system.h"
+#include "settings/GUISettings.h"
 #include "cores/VideoRenderers/RenderFlags.h"
 #include "windowing/WindowingFactory.h"
 #include "settings/AdvancedSettings.h"
-#include "settings/GUISettings.h"
 #include "settings/Settings.h"
 #include "video/VideoReferenceClock.h"
 #include "utils/MathUtils.h"
@@ -234,7 +234,7 @@ void CDVDPlayerVideo::OpenStream(CDVDStreamInfo &hint, CDVDVideoCodec* codec)
   m_bFpsInvalid = (hint.fpsrate == 0 || hint.fpsscale == 0);
 
   m_bCalcFrameRate = g_guiSettings.GetBool("videoplayer.usedisplayasclock") ||
-                     g_guiSettings.GetInt("videoplayer.adjustrefreshrate") != ADJUST_REFRESHRATE_OFF;
+                     g_guiSettings.GetInt("videoplayer.adjustrefreshrate") != 0;
   ResetFrameRateCalc();
 
   m_iDroppedRequest = 0;
@@ -432,7 +432,12 @@ void CDVDPlayerVideo::Process()
     else if (pMsg->IsType(CDVDMsg::GENERAL_RESET))
     {
       if(m_pVideoCodec)
+      {
         m_pVideoCodec->Reset();
+        /* PLEX */
+        memset(&picture, 0, sizeof(DVDVideoPicture));
+        /* END PLEX */
+      }
       picture.iFlags &= ~DVP_FLAG_ALLOCATED;
       m_packets.clear();
       m_started = false;
@@ -440,7 +445,12 @@ void CDVDPlayerVideo::Process()
     else if (pMsg->IsType(CDVDMsg::GENERAL_FLUSH)) // private message sent by (CDVDPlayerVideo::Flush())
     {
       if(m_pVideoCodec)
+      {
         m_pVideoCodec->Reset();
+        /* PLEX */
+        memset(&picture, 0, sizeof(DVDVideoPicture));
+        /* END PLEX */
+      }
       picture.iFlags &= ~DVP_FLAG_ALLOCATED;
       m_packets.clear();
 
@@ -585,6 +595,9 @@ void CDVDPlayerVideo::Process()
           }
 
           m_pVideoCodec->Reset();
+          /* PLEX */
+          memset(&picture, 0, sizeof(DVDVideoPicture));
+          /* END PLEX */
           m_packets.clear();
           break;
         }
@@ -730,6 +743,9 @@ void CDVDPlayerVideo::Process()
           {
             CLog::Log(LOGWARNING, "Decoder Error getting videoPicture.");
             m_pVideoCodec->Reset();
+            /* PLEX */
+            memset(&picture, 0, sizeof(DVDVideoPicture));
+            /* END PLEX */
           }
         }
 

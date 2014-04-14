@@ -22,6 +22,36 @@
 
 #include "utils/StdString.h"
 
+
+/* PLEX */
+#include "Job.h"
+#include "JobManager.h"
+
+
+class ScriptJob : public CJob
+{
+  public:
+    enum ScriptJobType
+    {
+      SCRIPT_JOB_APPLE_SCRIPT,
+      SCRIPT_JOB_APPLE_SCRIPT_FILE,
+    };
+
+    static void DoScriptJob(ScriptJobType type, const CStdString& scriptData);
+
+    ScriptJob(ScriptJobType type, const CStdString& scriptData) :
+      CJob(), m_type(type), m_scriptData(scriptData)
+    {}
+
+    bool DoWork();
+
+  private:
+    CStdString m_scriptData;
+    ScriptJobType m_type;
+};
+
+/* END PLEX */
+
 class CBuiltins
 {
 public:

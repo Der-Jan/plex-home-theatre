@@ -18,6 +18,12 @@
  *
  */
 
+/* PLEX */
+#include "AdvancedSettings.h"
+#include <stdexcept>
+#include "PlexApplication.h"
+/* END PLEX */
+
 #include "system.h"
 #include "log.h"
 #include "stdio_utf8.h"
@@ -83,6 +89,17 @@ void CLog::Log(int loglevel, const char *format, ... )
     strData.FormatV(format,va);
     va_end(va);
 
+    /* PLEX */
+    // Take out tokens.
+    if (g_advancedSettings.m_bEnablePlexTokensInLogs == false && strData.find("X-Plex-Token") != std::string::npos)
+    {
+      int offset = strData.find("X-Plex-Token") + 13; // 13 == length of X-Plex-Token=
+
+      // NOTE we are assuming that tokens are 20 chars here
+      strData = strData.replace(offset, 20, "SECRETSTUFF");
+    }
+    /* END PLEX */
+
     if (m_repeatLogLevel == loglevel && m_repeatLine == strData)
     {
       m_repeatCount++;
@@ -112,8 +129,7 @@ void CLog::Log(int loglevel, const char *format, ... )
       strData.TrimRight("\r");
     }
 
-    if (!length)
-      return;
+    if (!length) return;
     
     OutputDebugString(strData);
 
@@ -127,6 +143,10 @@ void CLog::Log(int loglevel, const char *format, ... )
 #if defined(TARGET_ANDROID) && defined(_DEBUG)
   CXBMCApp::android_printf("%s%s",strPrefix.c_str(), strData.c_str());
 #endif
+
+    /* PLEX */
+    g_plexApplication.sendNetworkLog(loglevel, strPrefix + strData);
+    /* END PLEX */
 
     fputs(strPrefix.c_str(), m_file);
     fputs(strData.c_str(), m_file);
@@ -143,8 +163,13 @@ bool CLog::Init(const char* path)
     // and changed in CApplication::Create()
     CStdString strLogFile, strLogFileOld;
 
+#ifndef __PLEX__
     strLogFile.Format("%sxbmc.log", path);
     strLogFileOld.Format("%sxbmc.old.log", path);
+#else
+    strLogFile.Format("%s%s.log", path, PLEX_TARGET_NAME);
+    strLogFileOld.Format("%s%s.old.log", path, PLEX_TARGET_NAME);
+#endif
 
 #if defined(TARGET_WINDOWS)
     // the appdata folder might be redirected to an unc share
@@ -236,3 +261,23 @@ void CLog::OutputDebugString(const std::string& line)
   ::OutputDebugString("\n");
 #endif
 }
+
+/* PLEX */
+void CLog::FatalError(const char* format, ...)
+{
+  char msg[2048];
+  va_list va;
+  va_start(va, format);
+  vsprintf(msg, format, va);
+  va_end(va);
+
+  Log(LOGFATAL, "FATAL ERROR: %s", msg);
+#ifdef _WIN32
+  // Terminate the process while generating a crash dump
+  const DWORD STATUS_FATAL_ERROR = 0xc0dedead;
+  RaiseException(STATUS_FATAL_ERROR, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#else
+  throw std::runtime_error(msg);
+#endif
+}
+/* END PLEX */

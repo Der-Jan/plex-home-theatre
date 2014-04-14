@@ -19,21 +19,21 @@
  *
  */
 
-#if defined(HAVE_CONFIG_H) && !defined(TARGET_WINDOWS)
-#include "config.h"
-#define DECLARE_UNUSED(a,b) a __attribute__((unused)) b;
-#endif
+#include "cores/IPlayer.h"
+#include "threads/Thread.h"
+#include "IDVDPlayer.h"
+
+/* PLEX */
+#include "Variant.h"
+/* END PLEX */
+
 
 #include <semaphore.h>
 #include <deque>
 
-#include "FileItem.h"
-#include "cores/IPlayer.h"
-#include "cores/dvdplayer/IDVDPlayer.h"
-#include "dialogs/GUIDialogBusy.h"
-#include "threads/Thread.h"
-#include "threads/SingleLock.h"
 
+
+#include "dialogs/GUIDialogBusy.h"
 #include "OMXCore.h"
 #include "OMXClock.h"
 #include "OMXPlayerAudio.h"
@@ -45,6 +45,8 @@
 
 #include "linux/DllBCM.h"
 #include "Edl.h"
+#include "FileItem.h"
+#include "threads/SingleLock.h"
 
 #define MAX_CHAPTERS 64
 
@@ -114,7 +116,11 @@ public:
   }
 };
 
+#ifndef __PLEX__
 typedef struct
+#else
+struct OMXSelectionStream
+#endif
 {
   StreamType   type;
   int          type_index;
@@ -127,7 +133,44 @@ typedef struct
   int          id;
   std::string  codec;
   int          channels;
+
+
+  /* PLEX */
+  OMXSelectionStream()
+    : plexID(-1)
+    , plexSubIndex(-1)
+  {}
+
+  OMXSelectionStream& operator=(const OMXSelectionStream& other)
+  {
+    // Preserve Plex ID by *not* copying over plexID member
+    type = other.type;
+    filename = other.filename;
+
+    // Stream language from Plex stream.
+    if (type != STREAM_SUBTITLE)
+      name = other.name;
+    else if (language.size() != 3)
+      name = language;
+
+    language = other.language;
+    id = other.id;
+    flags = other.flags;
+    source = other.source;
+
+    return *this;
+  }
+  int plexID;
+  int plexSubIndex;
+  /* END PLEX */
+#ifndef __PLEX__
 } OMXSelectionStream;
+#else
+};
+#endif
+
+
+
 
 typedef std::vector<OMXSelectionStream> OMXSelectionStreams;
 
@@ -227,6 +270,8 @@ public:
   virtual float GetPercentage();
   virtual float GetCachePercentage();
 
+  virtual void  SetMute(bool bOnOff);
+  virtual bool  ControlsVolume() {return true;}
   virtual void  SetVolume(float fVolume);
   virtual void  SetDynamicRangeCompression(long drc)              {}
   virtual void  GetAudioInfo(CStdString &strAudioInfo);
@@ -330,6 +375,25 @@ public:
   virtual void  GetScalingMethods(std::vector<int> &scalingMethods);
   virtual void  GetAudioCapabilities(std::vector<int> &audioCaps);
   virtual void  GetSubtitleCapabilities(std::vector<int> &subCaps);
+
+
+   /* PLEX */
+  virtual int GetSubtitlePlexID();
+  virtual int GetAudioStreamPlexID();
+  virtual void SetAudioStreamPlexID(int plexID);
+  virtual void SetSubtitleStreamPlexID(int plexID);
+  virtual int GetPlexMediaPartID()
+  {
+    CFileItemPtr part = m_item.m_selectedMediaPart;
+    if (part)
+      return part->GetProperty("id").asInteger();
+
+    return -1;
+  }
+  virtual bool CanOpenAsync() { return false; }
+  virtual void Abort() { m_bAbortRequest = true; }
+  /* END PLEX */
+
 protected:
   friend class COMXSelectionStreams;
 
@@ -373,6 +437,13 @@ protected:
     int iSelectedAudioStream; // mpeg stream id, or -1 if disabled
   } m_dvd;
 
+  enum ETimeSource
+  {
+    ETIMESOURCE_CLOCK,
+    ETIMESOURCE_INPUT,
+    ETIMESOURCE_MENU,
+  };
+
   struct SPlayerState
   {
     SPlayerState() { Clear(); }
@@ -382,6 +453,7 @@ protected:
       time          = 0;
       time_total    = 0;
       time_offset   = 0;
+      time_src      = ETIMESOURCE_CLOCK;
       dts           = DVD_NOPTS_VALUE;
       player_state  = "";
       chapter       = 0;
@@ -404,6 +476,7 @@ protected:
 
     double time;              // current playback time
     double time_total;        // total playback time
+    ETimeSource time_src;     // current time source
     double dts;               // last known dts
 
     std::string player_state;  // full player state
@@ -484,7 +557,26 @@ private:
   CEvent                  m_ready;
 
   float                   m_current_volume;
+  bool                    m_current_mute;
   bool                    m_change_volume;
   CDVDOverlayContainer    m_overlayContainer;
   ECacheState             m_caching;
+
+  bool m_HasVideo;
+  bool m_HasAudio;
+
+  /* PLEX */
+  void RelinkPlexStreams();
+
+  CStdString   m_strError;
+  CFileItemPtr m_itemWithDetails;
+  bool         m_hidingSub;
+  int          m_vobsubToDisplay;
+
+
+  unsigned int m_readRate;
+  void UpdateReadRate();
+  /* END PLEX */
+
+
 };

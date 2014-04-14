@@ -34,6 +34,10 @@
 #include "utils/XBMCTinyXML.h"
 #include "XBIRRemote.h"
 
+/* PLEX */
+#include "PlexTypes.h"
+/* END PLEX */
+
 #if defined(TARGET_WINDOWS)
 #include "input/windows/WINJoystick.h"
 #elif defined(HAS_SDL_JOYSTICK) || defined(HAS_EVENT_SERVER)
@@ -232,6 +236,14 @@ static const ActionMapping actions[] =
         {"wheeldown"         , ACTION_MOUSE_WHEEL_DOWN},
         {"mousedrag"         , ACTION_MOUSE_DRAG},
         {"mousemove"         , ACTION_MOUSE_MOVE},
+  
+        /* PLEX */
+        {"markaswatched"        , ACTION_MARK_AS_WATCHED},
+        {"markasunwatched"      , ACTION_MARK_AS_UNWATCHED},
+        {"clearfilters"         , ACTION_CLEAR_FILTERS},
+        {"cycleprimaryfilter"   , ACTION_PLEX_CYCLE_PRIMARY_FILTER},
+        {"toggleunwatchedfilter", ACTION_PLEX_TOGGLE_UNWATCHED_FILTER},
+        /* END PLEX */
 
         // Do nothing action
         { "noop"             , ACTION_NOOP}
@@ -239,6 +251,18 @@ static const ActionMapping actions[] =
 
 static const ActionMapping windows[] =
        {{"home"                     , WINDOW_HOME},
+        /* PLEX */
+        {"channels"                 , WINDOW_PLEX_MYCHANNELS},
+        {"sharedcontent"            , WINDOW_SHARED_CONTENT},
+        {"nowplaying"               , WINDOW_NOW_PLAYING},
+        {"plexsearch"               , WINDOW_PLEX_SEARCH},
+        {"plexpreplayvideo"         , WINDOW_PLEX_PREPLAY_VIDEO},
+        {"plexpreplaymusic"         , WINDOW_PLEX_PREPLAY_MUSIC},
+        {"myplexlogin"              , WINDOW_MYPLEX_LOGIN},
+        {"filterdialog"             , WINDOW_DIALOG_FILTER_SORT},
+        {"plexsubtitlepicker"       , WINDOW_DIALOG_PLEX_SUBTITLE_PICKER},
+        {"plexaudiopicker"          , WINDOW_DIALOG_PLEX_AUDIO_PICKER },        
+        /* END PLEX */
         {"programs"                 , WINDOW_PROGRAMS},
         {"pictures"                 , WINDOW_PICTURES},
         {"filemanager"              , WINDOW_FILES},
@@ -565,6 +589,11 @@ bool CButtonTranslator::LoadKeymap(const CStdString &keymapPath)
     return false;
   }
   TiXmlElement* pRoot = xmlDoc.RootElement();
+  if (!pRoot)
+  {
+    CLog::Log(LOGERROR, "Error getiing keymap root: %s", keymapPath.c_str());
+    return false;
+  }
   CStdString strValue = pRoot->Value();
   if ( strValue != "keymap")
   {

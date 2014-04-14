@@ -61,6 +61,15 @@ namespace MEDIA_DETECT
 #include "windowing/XBMC_events.h"
 #include "threads/Thread.h"
 
+/* PLEX */
+#include "plex/Windows/LaunchHost.h"
+class CPlexHTTPRemoteHandler;
+class CGUIDialogCache;
+class PlexApplication;
+typedef boost::shared_ptr<PlexApplication> PlexApplicationPtr;
+#include "plex/CrashReporter/Breakpad.h"
+/* END PLEX */
+
 class CSeekHandler;
 class CKaraokeLyricsManager;
 class CInertialScrollingHandler;
@@ -180,8 +189,10 @@ public:
   bool PlayMediaSync(const CFileItem& item, int iPlaylist = PLAYLIST_MUSIC);
   bool ProcessAndStartPlaylist(const CStdString& strPlayList, PLAYLIST::CPlayList& playlist, int iPlaylist, int track=0);
   bool PlayFile(const CFileItem& item, bool bRestart = false);
+#ifndef __PLEX__
   void SaveFileState(bool bForeground = false);
   void UpdateFileState();
+#endif
   void StopPlaying();
   void Restart(bool bSamePosition = true);
   void DelayedPlayerRestart();
@@ -362,6 +373,32 @@ public:
 
   CSplash* GetSplash() { return m_splash; }
   void SetRenderGUI(bool renderGUI);
+
+  /* PLEX */
+  bool m_bPlaybackInFullScreen;
+
+  void Hide();
+
+  void ShowBusyIndicator();
+  void HideBusyIndicator();
+
+  void UpdateFileState(const std::string& state="", bool force=false);
+  void UpdateViewOffset();
+
+  void RestartWithNewPlayer(CGUIDialogCache* cacheDlg, const CStdString& newURL);
+  CFileItemPtr& CurrentFileItemPtr();
+
+  bool IsBuffering() const;
+
+  bool IsVisualizerActive();
+  void ActivateVisualizer();
+
+  void OnWakeUp();
+
+  void ForceVersionCheck();
+  void SetReturnFromAutoUpdate() { m_returnFromAutoUpdate = true; }
+  bool GetReturnedFromAutoUpdate() const { return m_returnFromAutoUpdate; }
+  /* END PLEX */
 protected:
   bool LoadSkin(const CStdString& skinID);
   void LoadSkin(const boost::shared_ptr<ADDON::CSkinInfo>& skin);
@@ -378,14 +415,15 @@ protected:
   // timer information
 #ifdef _WIN32
   CWinIdleTimer m_idleTimer;
+  CWinIdleTimer m_screenSaverTimer;
 #else
   CStopWatch m_idleTimer;
+  CStopWatch m_screenSaverTimer;
 #endif
   CStopWatch m_restartPlayerTimer;
   CStopWatch m_frameTime;
   CStopWatch m_navigationTimer;
   CStopWatch m_slowTimer;
-  CStopWatch m_screenSaverTimer;
   CStopWatch m_shutdownTimer;
 
   bool m_bInhibitIdleShutdown;
@@ -468,6 +506,16 @@ protected:
   std::map<std::string, std::map<int, float> > m_lastAxisMap;
 #endif
 
+
+  /* PLEX */
+#ifdef HAVE_BREAKPAD
+  BreakpadScope *m_breakpad;
+#endif
+
+  CPlexHTTPRemoteHandler& m_plexRemoteHandler;
+  LaunchHost *m_pLaunchHost;
+  bool m_returnFromAutoUpdate;
+  /* END PLEX */
 };
 
 XBMC_GLOBAL_REF(CApplication,g_application);

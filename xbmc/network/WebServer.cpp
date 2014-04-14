@@ -22,6 +22,7 @@
 #ifdef HAS_WEB_SERVER
 #include "filesystem/File.h"
 #include "utils/log.h"
+#include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/Variant.h"
 #include "utils/Base64.h"
@@ -54,15 +55,21 @@ CWebServer::CWebServer()
 
 int CWebServer::FillArgumentMap(void *cls, enum MHD_ValueKind kind, const char *key, const char *value) 
 {
+  if (cls == NULL || key == NULL)
+    return MHD_NO;
+
   map<string, string> *arguments = (map<string, string> *)cls;
-  arguments->insert(pair<string,string>(key,value));
+  arguments->insert(pair<string, string>(key, value != NULL ? value : StringUtils::Empty));
   return MHD_YES; 
 }
 
 int CWebServer::FillArgumentMultiMap(void *cls, enum MHD_ValueKind kind, const char *key, const char *value) 
 {
+  if (cls == NULL || key == NULL)
+    return MHD_NO;
+
   multimap<string, string> *arguments = (multimap<string, string> *)cls;
-  arguments->insert(pair<string,string>(key,value));
+  arguments->insert(pair<string, string>(key, value != NULL ? value : StringUtils::Empty));
   return MHD_YES; 
 }
 
@@ -339,6 +346,11 @@ HTTPMethod CWebServer::GetMethod(const char *method)
     return POST;
   if (strcmp(method, "HEAD") == 0)
     return HEAD;
+
+  /* PLEX */
+  if (strcmp(method, "OPTIONS") == 0)
+    return OPTIONS;
+  /* END PLEX */
 
   return UNKNOWN;
 }

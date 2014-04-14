@@ -4,6 +4,7 @@ OBJS-$(CONFIG_AC3DSP)                  += arm/ac3dsp_init_arm.o         \
 OBJS-$(CONFIG_DCA_DECODER)             += arm/dcadsp_init_arm.o         \
 
 ARMV6-OBJS-$(CONFIG_AC3DSP)            += arm/ac3dsp_armv6.o
+ARMV6-OBJS-$(CONFIG_H264DSP)           += arm/h264dsp_armv6.o
 
 OBJS-$(CONFIG_MPEGAUDIODSP)            += arm/mpegaudiodsp_init_arm.o
 ARMV6-OBJS-$(CONFIG_MPEGAUDIODSP)      += arm/mpegaudiodsp_fixed_armv6.o
@@ -36,7 +37,11 @@ OBJS-$(HAVE_ARMV6)                     += arm/dsputil_init_armv6.o      \
                                           arm/simple_idct_armv6.o       \
                                           $(ARMV6-OBJS-yes)
 
-VFP-OBJS-$(HAVE_ARMV6)                 += arm/fmtconvert_vfp.o          \
+VFP-OBJS-$(HAVE_ARMV6)                 += arm/dcadsp_vfp.o              \
+                                          arm/fft_vfp.o                 \
+                                          arm/fmtconvert_vfp.o          \
+                                          arm/mdct_vfp.o                \
+                                          arm/synth_filter_vfp.o
 
 OBJS-$(HAVE_ARMVFP)                    += arm/dsputil_vfp.o             \
                                           arm/dsputil_init_vfp.o        \

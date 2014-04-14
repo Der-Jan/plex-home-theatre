@@ -115,6 +115,7 @@
 
 using namespace XFILE;
 
+#ifndef __PLEX__
 /*!
  \brief Create a IDirectory object of the share type specified in \e strPath .
  \param strPath Specifies the share type to access, can be a share or share with path.
@@ -232,4 +233,42 @@ IDirectory* CDirectoryFactory::Create(const CStdString& strPath)
   CLog::Log(LOGWARNING, "%s - Unsupported protocol(%s) in %s", __FUNCTION__, strProtocol.c_str(), url.Get().c_str() );
   return NULL;
 }
+#else
+#include "FileSystem/PlexDirectory.h"
+
+IDirectory* CDirectoryFactory::Create(const CStdString& strPath)
+{
+  CURL url(strPath);
+
+  CFileItem item(strPath, false);
+  IFileDirectory* pDir=CFileDirectoryFactory::Create(strPath, &item);
+  if (pDir)
+    return pDir;
+
+  CStdString strProtocol = url.GetProtocol();
+
+  if (strProtocol.size() == 0 || strProtocol == "file") return new CHDDirectory();
+  if (strProtocol == "stack") return new CStackDirectory();
+  if (strProtocol == "special") return new CSpecialProtocolDirectory();
+  if (strProtocol == "zip") return new CZipDirectory();
+#if defined(HAS_FILESYSTEM_CDDA) && defined(HAS_DVD_DRIVE)
+  if (strProtocol == "cdda") return new CCDDADirectory();
+#endif
+#ifdef HAS_FILESYSTEM
+  if (strProtocol == "iso9660") return new CISO9660Directory();
+#endif
+  if (strProtocol == "udf") return new CUDFDirectory();
+  /* PLEX - fix the "Now Playing" videoplaylist queue */
+  if (strProtocol == "playlistvideo") return new CPlaylistDirectory();
+  /* END PLEX */
+
+  if( g_application.getNetwork().IsAvailable(true) )  // true to wait for the network (if possible)
+  {
+    if (strProtocol == "plexserver") return new CPlexDirectory();
+    if (strProtocol == "http" || strProtocol == "https") return new CHTTPDirectory();
+  }
+  CLog::Log(LOGWARNING, "%s - Unsupported protocol(%s) in %s", __FUNCTION__, strProtocol.c_str(), url.Get().c_str() );
+  return NULL;
+}
+#endif
 

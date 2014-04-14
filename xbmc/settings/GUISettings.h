@@ -20,6 +20,10 @@
  *
  */
 
+#ifdef __PLEX__
+#include "plex/Owned/GUISettings.h"
+#else
+
 #include <vector>
 #include <map>
 #include "guilib/Resolution.h"
@@ -84,6 +88,7 @@ class TiXmlElement;
 #define AUDIO_ANALOG      0
 #define AUDIO_IEC958      1
 #define AUDIO_HDMI        2
+#define AUDIO_COUNT       3
 #define AUDIO_IS_BITSTREAM(x) ((x) == AUDIO_IEC958 || (x) == AUDIO_HDMI)
 
 #define VIDEO_NORMAL 0
@@ -529,3 +534,5 @@ private:
 
 XBMC_GLOBAL_REF(CGUISettings, g_guiSettings);
 #define g_guiSettings XBMC_GLOBAL_USE(CGUISettings)
+
+#endif

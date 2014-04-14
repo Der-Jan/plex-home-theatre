@@ -114,6 +114,8 @@ public:
   virtual void SeekPercentage(float fPercent = 0){}
   virtual float GetPercentage(){ return 0;}
   virtual float GetCachePercentage(){ return 0;}
+  virtual bool ControlsVolume(){ return false;}
+  virtual void SetMute(bool bOnOff){}
   virtual void SetVolume(float volume){}
   virtual void SetDynamicRangeCompression(long drc){}
   virtual void GetAudioInfo( CStdString& strAudioInfo) = 0;
@@ -226,6 +228,17 @@ public:
    \brief define the subtitle capabilities of the player
    */
   virtual void GetSubtitleCapabilities(std::vector<int> &subCaps) { subCaps.assign(1,IPC_SUBS_ALL); };
+
+  /* PLEX */
+  virtual void SetSubtitleStreamPlexID(int plexID) {};
+  virtual void SetAudioStreamPlexID(int plexID) {};
+  virtual int GetSubtitlePlexID() { return -1; };
+  virtual int GetAudioStreamPlexID() { return -1; };
+  virtual int GetPlexMediaPartID() { return -1; };
+  virtual bool CanOpenAsync() { return false; };
+  virtual void Abort() {};
+  virtual void FadeOut(int milliseconds) {};
+  /* END PLEX */
 
 protected:
   IPlayerCallback& m_callback;

@@ -88,6 +88,62 @@ bool CTextureCacheJob::CacheTexture(CBaseTexture **out_texture)
   else if (m_details.hash == m_oldHash)
     return true;
 
+  /* PLEX */
+#if defined(TARGET_RASPBERRY_PI)
+  XFILE::CFile inputFile, outputFile;
+  int bytesRead, bufferSize = 131072;
+  char buffer[bufferSize];
+  bool outputFileOpenned = false;
+
+  // check that file is a picture
+  CFileItem file(image, false);
+  if (!(file.IsPicture() && !(file.IsZIP() || file.IsRAR() || file.IsCBR() || file.IsCBZ() ))
+      && !file.GetMimeType().Left(6).Equals("image/") && !file.GetMimeType().Equals("application/octet-stream")) // ignore non-pictures
+  {
+    CLog::Log(LOGERROR,"CTextureCacheJob::CacheTexture file %s is not a picture",image.c_str());
+    return false;
+  }
+
+  if (inputFile.Open(image,READ_NO_CACHE))
+  {
+    while (bytesRead = inputFile.Read(buffer,bufferSize))
+    {
+      // eventually open output file depending upon filetype
+      if (!outputFileOpenned)
+      {
+        // we need to check if its a jpg or png
+        if ((buffer[0]==0xFF) && (buffer[1]==0xD8))
+          m_details.file = m_cachePath + ".jpg";
+        else
+          m_details.file = m_cachePath + ".png";
+
+        // now open the file
+        if (outputFile.OpenForWrite(CTextureCache::GetCachedPath(m_details.file),true))
+        {
+          outputFileOpenned = true;
+        }
+        else
+        {
+          inputFile.Close();
+          CLog::Log(LOGERROR,"CTextureCacheJob::CacheTexture unable to open output file %s",CTextureCache::GetCachedPath(m_details.file).c_str());
+          return false;
+        }
+      }
+
+      outputFile.Write(buffer,bytesRead);
+    }
+
+    inputFile.Close();
+    outputFile.Close();
+    return true;
+  }
+  else
+  {
+    CLog::Log(LOGERROR,"CTextureCacheJob::CacheTexture unable to open input file %s",image.c_str());
+    return false;
+  }
+#else
+  /* END PLEX */
   CBaseTexture *texture = LoadImage(image, width, height, additional_info);
   if (texture)
   {
@@ -111,6 +167,7 @@ bool CTextureCacheJob::CacheTexture(CBaseTexture **out_texture)
   }
   delete texture;
   return false;
+#endif
 }
 
 CStdString CTextureCacheJob::DecodeImageURL(const CStdString &url, unsigned int &width, unsigned int &height, std::string &additional_info)
@@ -202,6 +259,13 @@ bool CTextureCacheJob::UpdateableURL(const CStdString &url) const
 
 CStdString CTextureCacheJob::GetImageHash(const CStdString &url)
 {
+  /* PLEX */
+  if (URIUtils::IsInternetStream(url))
+  {
+    /* Shortcut, instead of stating the URL let's just hash the URL */
+    return url;
+  }
+  /* END PLEX */
   struct __stat64 st;
   if (XFILE::CFile::Stat(url, &st) == 0)
   {

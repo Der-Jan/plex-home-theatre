@@ -81,6 +81,21 @@
 #include "video/VideoDatabase.h"
 #include "cores/AudioEngine/Utils/AEUtil.h"
 
+/* PLEX */
+#include "ThumbLoader.h"
+#include "guilib/GUILabelControl.h"
+#include "GUI/GUIWindowPlexSearch.h"
+#include "GUI/GUIWindowNowPlaying.h"
+#include "playlists/PlayList.h"
+#include "plex/Client/PlexServerManager.h"
+#include "music/dialogs/GUIDialogMusicInfo.h"
+#include "plex/PlexApplication.h"
+#include "AutoUpdate/PlexAutoUpdate.h"
+#include "git_revision.h"
+
+using namespace PLAYLIST;
+/* END PLEX */
+
 #define SYSHEATUPDATEINTERVAL 60000
 
 using namespace std;
@@ -104,7 +119,7 @@ CGUIInfoManager::CGUIInfoManager(void) :
   m_nextWindowID = WINDOW_INVALID;
   m_prevWindowID = WINDOW_INVALID;
   m_stringParameters.push_back("__ZZZZ__");   // to offset the string parameters by 1 to assure that all entries are non-zero
-  m_currentFile = new CFileItem;
+  m_currentFile = CFileItemPtr(new CFileItem);
   m_currentSlide = new CFileItem;
   m_frameCounter = 0;
   m_lastFPSTime = 0;
@@ -114,13 +129,25 @@ CGUIInfoManager::CGUIInfoManager(void) :
   m_playerShowCodec = false;
   m_playerShowInfo = false;
   m_fps = 0.0f;
+
+  /* PLEX */
+  m_slideshowShowDescription = false;
+  m_musicThumbLoader = new CMusicThumbLoader();//(1, 200);
+  /* END PLEX */
+
   ResetLibraryBools();
 }
 
 CGUIInfoManager::~CGUIInfoManager(void)
 {
+#ifndef __PLEX__
   delete m_currentFile;
+#endif
   delete m_currentSlide;
+
+  /* PLEX */
+  delete m_musicThumbLoader;
+  /* END PLEX */
 }
 
 bool CGUIInfoManager::OnMessage(CGUIMessage &message)
@@ -158,6 +185,9 @@ typedef struct
 } infomap;
 
 const infomap player_labels[] =  {{ "hasmedia",         PLAYER_HAS_MEDIA },           // bools from here
+                                  /* PLEX */
+                                  { "hasmusicplaylist",       PLAYER_HAS_MUSIC_PLAYLIST },
+                                  /* END PLEX */
                                   { "hasaudio",         PLAYER_HAS_AUDIO },
                                   { "hasvideo",         PLAYER_HAS_VIDEO },
                                   { "playing",          PLAYER_PLAYING },
@@ -222,6 +252,12 @@ const infomap weather[] =        {{ "isfetched",        WEATHER_IS_FETCHED },
                                   { "plugin",           WEATHER_PLUGIN }};
 
 const infomap system_labels[] =  {{ "hasnetwork",       SYSTEM_ETHERNET_LINK_ACTIVE },
+                                  /* PLEX */
+                                  { "searchinprogress", SYSTEM_SEARCH_IN_PROGRESS },
+                                  { "selectedplexmediaserver", SYSTEM_SELECTED_PLEX_MEDIA_SERVER },
+                                  { "updateisavailable", SYSTEM_UPDATE_IS_AVAILABLE },
+                                  { "noplexservers",    SYSTEM_NO_PLEX_SERVERS },
+                                  /* END PLEX */
                                   { "hasmediadvd",      SYSTEM_MEDIA_DVD },
                                   { "dvdready",         SYSTEM_DVDREADY },
                                   { "trayopen",         SYSTEM_TRAYOPEN },
@@ -329,6 +365,12 @@ const infomap lastfm[] =         {{ "radioplaying",      LASTFM_RADIOPLAYING },
                                   { "canban",            LASTFM_CANBAN}};
 
 const infomap musicplayer[] =    {{ "title",            MUSICPLAYER_TITLE },
+                                  /* PLEX */
+                                  { "hasnewcovernext",  MUSICPLAYER_HAS_NEW_COVER_NEXT },
+                                  { "nextnewcover",     MUSICPLAYER_NEXT_NEW_COVER },
+                                  { "nowplayingflipped",MUSICPLAYER_NOW_PLAYING_FLIPPED },
+                                  { "musicplayerfanart",MUSICPLAYER_FANART },
+                                  /* END PLEX */
                                   { "album",            MUSICPLAYER_ALBUM },
                                   { "artist",           MUSICPLAYER_ARTIST },
                                   { "albumartist",      MUSICPLAYER_ALBUM_ARTIST },
@@ -412,6 +454,10 @@ const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
                                   { "channelnumber",    VIDEOPLAYER_CHANNEL_NUMBER },
                                   { "channelgroup",     VIDEOPLAYER_CHANNEL_GROUP },
                                   { "hasepg",           VIDEOPLAYER_HAS_EPG },
+                                  /* PLEX */
+                                  { "audiostream",      VIDEOPLAYER_AUDIOSTREAM },
+                                  { "subtitlestream",   VIDEOPLAYER_SUBTITLESTREAM },
+                                  /* END PLEX */
                                   { "parentalrating",   VIDEOPLAYER_PARENTAL_RATING }};
 
 const infomap mediacontainer[] = {{ "hasfiles",         CONTAINER_HASFILES },
@@ -426,6 +472,9 @@ const infomap mediacontainer[] = {{ "hasfiles",         CONTAINER_HASFILES },
                                   { "viewmode",         CONTAINER_VIEWMODE },
                                   { "totaltime",        CONTAINER_TOTALTIME },
                                   { "hasthumb",         CONTAINER_HAS_THUMB },
+                                  /* PLEX */
+                                  { "thumb",            CONTAINER_THUMB },
+                                  /* END PLEX */
                                   { "sortmethod",       CONTAINER_SORT_METHOD },
                                   { "showplot",         CONTAINER_SHOWPLOT }};
 
@@ -450,9 +499,27 @@ const infomap container_ints[] = {{ "row",              CONTAINER_ROW },
                                   { "hasfocus",         CONTAINER_HAS_FOCUS }};
 
 const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
+                                  /* PLEX */
+                                  { "firsttitle",       CONTAINER_FIRST_TITLE },
+                                  { "secondtitle",      CONTAINER_SECOND_TITLE },
+                                  /* END PLEX */
                                   { "content",          CONTAINER_CONTENT }};
 
 const infomap listitem_labels[]= {{ "thumb",            LISTITEM_THUMB },
+                                  /* PLEX */
+                                  { "type",             LISTITEM_TYPE },
+                                  { "status",           LISTITEM_STATUS },
+                                  { "thumb0",           LISTITEM_THUMB0 },
+                                  { "thumb1",           LISTITEM_THUMB1 },
+                                  { "thumb2",           LISTITEM_THUMB2 },
+                                  { "thumb3",           LISTITEM_THUMB3 },
+                                  { "thumb4",           LISTITEM_THUMB4 },
+                                  { "banner",           LISTITEM_BANNER },
+                                  { "firstgenre",       LISTITEM_FIRST_GENRE },
+                                  { "stardiffuse",      LISTITEM_STAR_DIFFUSE },
+                                  { "grandparentthumb", LISTITEM_GRANDPARENT_THUMB },
+                                  { "durationstr",      LISTITEM_DURATION_STRING },
+                                  /* END PLEX */
                                   { "icon",             LISTITEM_ICON },
                                   { "actualicon",       LISTITEM_ACTUAL_ICON },
                                   { "overlay",          LISTITEM_OVERLAY },
@@ -637,6 +704,9 @@ const infomap pvr[] =            {{ "isrecording",              PVR_IS_RECORDING
 
 const infomap slideshow[] =      {{ "ispaused",         SLIDESHOW_ISPAUSED },
                                   { "isactive",         SLIDESHOW_ISACTIVE },
+                                  /* PLEX */
+                                  { "showdescription",  SLIDESHOW_SHOW_DESCRIPTION },
+                                  /* END PLEX */
                                   { "israndom",         SLIDESHOW_ISRANDOM }};
 
 const int picture_slide_map[]  = {/* LISTITEM_PICTURE_RESOLUTION => */ SLIDE_RESOLUTION,
@@ -874,6 +944,13 @@ int CGUIInfoManager::TranslateSingleString(const CStdString &strCondition)
           else if (param == "used.percent") return SYSTEM_USED_MEMORY_PERCENT;
           else if (param == "total") return SYSTEM_TOTAL_MEMORY;
         }
+        /* PLEX */
+        else if (prop.name == "issystem")
+        {
+          if (param == "rasplex") return SYSTEM_ISRASPLEX;
+          else if (param == "openelec") return SYSTEM_ISOPENELEC;
+        }
+        /* END PLEX */
         else if (prop.name == "addontitle")
         {
           int infoLabel = TranslateSingleString(param);
@@ -1023,6 +1100,12 @@ int CGUIInfoManager::TranslateSingleString(const CStdString &strCondition)
     {
       int offset = atoi(cat.param().c_str());
       int ret = TranslateListItem(prop);
+
+      if (ret == LISTITEM_TYPE || ret == LISTITEM_STATUS)
+      {
+        return AddMultiInfo(GUIInfo(ret, 0, offset, INFOFLAG_LISTITEM_WRAP, ConditionalStringParameter(prop.param())));
+      }
+
       if (offset || ret == LISTITEM_ISSELECTED || ret == LISTITEM_ISPLAYING || ret == LISTITEM_IS_FOLDER)
         return AddMultiInfo(GUIInfo(ret, 0, offset, INFOFLAG_LISTITEM_WRAP));
       return ret;
@@ -1175,7 +1258,14 @@ int CGUIInfoManager::TranslateSingleString(const CStdString &strCondition)
       else if (info[1].name == "listitemposition")
         return AddMultiInfo(GUIInfo(TranslateListItem(info[2]), id, offset, INFOFLAG_LISTITEM_POSITION));
       else if (info[1].name == "listitem")
-        return AddMultiInfo(GUIInfo(TranslateListItem(info[2]), id, offset, INFOFLAG_LISTITEM_WRAP));
+      {
+        int ret = TranslateListItem(info[2]);
+
+        if (ret == LISTITEM_TYPE || ret == LISTITEM_STATUS)
+          return AddMultiInfo(GUIInfo(ret, id, offset, INFOFLAG_LISTITEM_WRAP, ConditionalStringParameter(info[2].param())));
+        else
+          return AddMultiInfo(GUIInfo(ret, id, offset, INFOFLAG_LISTITEM_WRAP));
+      }
     }
   }
 
@@ -1410,6 +1500,9 @@ CStdString CGUIInfoManager::GetLabel(int info, int contextWindow, CStdString *fa
   case MUSICPLAYER_CHANNEL_GROUP:
   case MUSICPLAYER_PLAYCOUNT:
   case MUSICPLAYER_LASTPLAYED:
+  /* PLEX */
+  case MUSICPLAYER_FANART:
+  /* PLEX */
     strLabel = GetMusicLabel(info);
   break;
   case VIDEOPLAYER_TITLE:
@@ -1452,6 +1545,10 @@ CStdString CGUIInfoManager::GetLabel(int info, int contextWindow, CStdString *fa
   case VIDEOPLAYER_CHANNEL_GROUP:
   case VIDEOPLAYER_PARENTAL_RATING:
   case VIDEOPLAYER_PLAYCOUNT:
+  /* PLEX */
+  case VIDEOPLAYER_AUDIOSTREAM:
+  case VIDEOPLAYER_SUBTITLESTREAM:
+  /* END PLEX */
   case VIDEOPLAYER_LASTPLAYED:
     strLabel = GetVideoLabel(info);
   break;
@@ -1879,6 +1976,19 @@ CStdString CGUIInfoManager::GetLabel(int info, int contextWindow, CStdString *fa
   case SYSTEM_RENDER_VERSION:
     strLabel = g_Windowing.GetRenderVersionString();
     break;
+
+  /* PLEX */
+  case SYSTEM_SELECTED_PLEX_MEDIA_SERVER:
+  {
+    CStdString ret;
+    CPlexServerPtr server = g_plexApplication.serverManager->GetBestServer();
+    if (server)
+      ret = server->GetName();
+
+    return ret;
+  }
+  /* END PLEX */
+
   }
 
   return strLabel;
@@ -2285,6 +2395,44 @@ bool CGUIInfoManager::GetBool(int condition1, int contextWindow, const CGUIListI
     CGUIWindowSlideShow *slideShow = (CGUIWindowSlideShow *)g_windowManager.GetWindow(WINDOW_SLIDESHOW);
     bReturn = (slideShow && slideShow->InSlideShow());
   }
+  /* PLEX */
+  else if (condition == SYSTEM_SEARCH_IN_PROGRESS)
+  {
+    CGUIWindowPlexSearch* searchWin = (CGUIWindowPlexSearch* )g_windowManager.GetWindow(WINDOW_PLEX_SEARCH);
+    if (searchWin && searchWin->InProgress())
+      bReturn = true;
+    else
+      bReturn = false;
+  }
+  else if (condition == SYSTEM_UPDATE_IS_AVAILABLE)
+  {
+#ifdef ENABLE_AUTOUPDATE
+    bReturn = g_plexApplication.autoUpdater->IsReadyToInstall();
+#else
+    return false;
+#endif
+  }
+  else if (condition == SYSTEM_NO_PLEX_SERVERS)
+  {
+    bReturn = !g_plexApplication.serverManager->HasAnyServerWithActiveConnection();
+  }
+  else if (condition == SYSTEM_ISRASPLEX)
+  {
+#ifdef TARGET_RASPBERRY_PI
+    bReturn = true;
+#else
+    bReturn = false;
+#endif
+  }
+  else if (condition == SYSTEM_ISOPENELEC)
+  {
+#ifdef OPENELEC
+    bReturn = true;
+#else
+    bReturn = false;
+#endif
+  }
+  /* END PLEX */
   else if (g_application.IsPlaying())
   {
     switch (condition)
@@ -2463,6 +2611,38 @@ bool CGUIInfoManager::GetBool(int condition1, int contextWindow, const CGUIListI
         bReturn = m_currentFile->GetPVRChannelInfoTag()->GetEPGNow(epgTag);
       }
     break;
+
+    /* PLEX */
+    case SLIDESHOW_SHOW_DESCRIPTION:
+      {
+        bReturn = m_slideshowShowDescription;
+      }
+      break;
+    case MUSICPLAYER_NOW_PLAYING_FLIPPED:
+      {
+        CGUIWindowNowPlaying *nowPlayingWindow = (CGUIWindowNowPlaying*)g_windowManager.GetWindow(WINDOW_NOW_PLAYING);
+        bReturn = (nowPlayingWindow != NULL ? nowPlayingWindow->IsFlipped() : false);
+        break;
+      }
+    case MUSICPLAYER_HAS_NEW_COVER_NEXT:
+      {
+        bReturn = false;
+        if (g_playlistPlayer.GetCurrentPlaylist() == PLAYLIST_MUSIC /*PLEX*/ && g_playlistPlayer.GetCurrentSong() >= 0 /* END PLEX */)
+        {
+          if (g_playlistPlayer.GetCurrentSong() < (g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC).size() - 1))
+          {
+            CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC);
+            bReturn = !(playlist[g_playlistPlayer.GetCurrentSong()]->GetArt(PLEX_ART_THUMB) == playlist[g_playlistPlayer.GetNextSong()]->GetArt(PLEX_ART_THUMB));
+          }
+        }
+        break;
+      }
+    case PLAYER_HAS_MUSIC_PLAYLIST:
+      bReturn = g_playlistPlayer.GetCurrentPlaylist() == PLAYLIST_MUSIC;
+      break;
+
+    /* END PLEX */
+
     default: // default, use integer value different from 0 as true
       {
         int val;
@@ -2490,14 +2670,21 @@ bool CGUIInfoManager::GetMultiInfoBool(const GUIInfo &info, int contextWindow, c
       if (!data1) // No container specified, so we lookup the current view container
       {
         window = GetWindowWithCondition(contextWindow, WINDOW_CONDITION_HAS_LIST_ITEMS);
+        /* PLEX */
+        if (window && (window->GetID() == WINDOW_PLEX_PREPLAY_VIDEO || window->GetID() == WINDOW_PLEX_PREPLAY_MUSIC))
+          item = window->GetCurrentListItem(info.GetData2()).get();
+        /* END PLEX */
         if (window && window->IsMediaWindow())
           data1 = ((CGUIMediaWindow*)(window))->GetViewContainerID();
       }
 
       if (!window) // If we don't have a window already (from lookup above), get one
         window = GetWindowWithCondition(contextWindow, 0);
-
+#ifndef __PLEX__
       if (window)
+#else
+      if (window && !item)
+#endif
       {
         const CGUIControl *control = window->GetControl(data1);
         if (control && control->IsContainer())
@@ -2505,7 +2692,9 @@ bool CGUIInfoManager::GetMultiInfoBool(const GUIInfo &info, int contextWindow, c
       }
     }
     if (item) // If we got a valid item, do the lookup
-      bReturn = GetItemBool(item, condition); // Image prioritizes images over labels (in the case of music item ratings for instance)
+      /* PLEX */
+      bReturn = GetItemBool(item, condition, info.GetSecondCondition()); // Image prioritizes images over labels (in the case of music item ratings for instance)
+      /* END PLEX */
   }
   else
   {
@@ -3108,6 +3297,30 @@ CStdString CGUIInfoManager::GetMultiInfoLabel(const GUIInfo &info, int contextWi
     if (addon && info.m_info == SYSTEM_ADDON_ICON)
       return addon->Icon();
   }
+  /* PLEX */
+  else if (info.m_info == CONTAINER_FIRST_TITLE)
+  {
+    CGUIMediaWindow *window = (CGUIMediaWindow*)GetWindowWithCondition(contextWindow, WINDOW_CONDITION_IS_MEDIA_WINDOW);
+    if (window)
+    {
+      if (window->CurrentDirectory().HasProperty("title1"))
+        return window->CurrentDirectory().GetProperty("title1").asString();
+      else
+        return window->CurrentDirectory().GetLabel();
+    }
+  }
+  else if (info.m_info == CONTAINER_SECOND_TITLE)
+  {
+    CGUIMediaWindow *window = (CGUIMediaWindow*)GetWindowWithCondition(contextWindow, WINDOW_CONDITION_IS_MEDIA_WINDOW);
+    if (window)
+    {
+      if (window->CurrentDirectory().HasProperty("title2"))
+        return window->CurrentDirectory().GetProperty("title2").asString();
+      else
+        return window->CurrentDirectory().GetLabel();
+    }
+  }
+  /* END PLEX */
 
   return StringUtils::EmptyString;
 }
@@ -3141,12 +3354,12 @@ CStdString CGUIInfoManager::GetImage(int info, int contextWindow, CStdString *fa
   else if (info == MUSICPLAYER_RATING)
   {
     if (!g_application.IsPlayingAudio()) return "";
-    return GetItemImage(m_currentFile, LISTITEM_RATING);
+    return GetItemImage(m_currentFile.get(), LISTITEM_RATING);
   }
   else if (info == PLAYER_STAR_RATING)
   {
     if (!g_application.IsPlaying()) return "";
-    return GetItemImage(m_currentFile, LISTITEM_STAR_RATING);
+    return GetItemImage(m_currentFile.get(), LISTITEM_STAR_RATING);
   }
   else if (info == VIDEOPLAYER_COVER)
   {
@@ -3175,8 +3388,17 @@ CStdString CGUIInfoManager::GetImage(int info, int contextWindow, CStdString *fa
     if (window)
       return ((CGUIMediaWindow *)window)->CurrentDirectory().GetArt("season.thumb");
   }
+  /* PLEX */
+  else if (info == CONTAINER_THUMB)
+  {
+    CGUIWindow *window = GetWindowWithCondition(contextWindow, WINDOW_CONDITION_IS_MEDIA_WINDOW);
+    if (window)
+      return ((CGUIMediaWindow *)window)->CurrentDirectory().GetArt("thumb");
+  }
+  /* END PLEX */
   else if (info == LISTITEM_THUMB || info == LISTITEM_ICON || info == LISTITEM_ACTUAL_ICON ||
-          info == LISTITEM_OVERLAY || info == LISTITEM_RATING || info == LISTITEM_STAR_RATING)
+          info == LISTITEM_OVERLAY || info == LISTITEM_RATING || info == LISTITEM_STAR_RATING ||
+          (info >= LISTITEM_THUMB0 && info <= LISTITEM_THUMB4)) /* PLEX added thumbs */
   {
     CGUIWindow *window = GetWindowWithCondition(contextWindow, WINDOW_CONDITION_HAS_LIST_ITEMS);
     if (window)
@@ -3186,6 +3408,25 @@ CStdString CGUIInfoManager::GetImage(int info, int contextWindow, CStdString *fa
         return GetItemImage(item.get(), info, fallback);
     }
   }
+  /* PLEX */
+  else if (info == MUSICPLAYER_NEXT_NEW_COVER)
+  {
+    if (g_playlistPlayer.GetCurrentPlaylist() == PLAYLIST_MUSIC)
+    {
+      if (g_playlistPlayer.GetCurrentSong() < (g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC).size() - 1))
+      {
+        CPlayList playlist = g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC);
+        for (int i=g_playlistPlayer.GetCurrentSong()+1; i < g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC).size(); i++)
+        {
+          if (!(playlist[g_playlistPlayer.GetCurrentSong()]->GetArt(PLEX_ART_THUMB) == playlist[i]->GetArt(PLEX_ART_THUMB)))
+            return playlist[i]->GetArt(PLEX_ART_THUMB);
+        }
+      }
+    }
+    return "";
+  }
+  /* END PLEX */
+
   return GetLabel(info, contextWindow, fallback);
 }
 
@@ -3518,9 +3759,9 @@ CStdString CGUIInfoManager::GetMusicLabel(int item)
     }
     break;
   case MUSICPLAYER_LYRICS:
-    return GetItemLabel(m_currentFile, AddListItemProp("lyrics"));
+    return GetItemLabel(m_currentFile.get(), AddListItemProp("lyrics"));
   }
-  return GetMusicTagLabel(item, m_currentFile);
+  return GetMusicTagLabel(item, m_currentFile.get());
 }
 
 CStdString CGUIInfoManager::GetMusicTagLabel(int info, const CFileItem *item)
@@ -3597,6 +3838,12 @@ CStdString CGUIInfoManager::GetMusicTagLabel(int info, const CFileItem *item)
     return GetItemLabel(item, LISTITEM_PLAYCOUNT);
   case MUSICPLAYER_LASTPLAYED:
     return GetItemLabel(item, LISTITEM_LASTPLAYED);
+  /* PLEX */
+  case MUSICPLAYER_FANART:
+    if (item->HasProperty("fanart_fallback") == false)
+      return item->GetProperty("fanart_image").asString();
+    break;
+  /* END PLEX */
   }
   return "";
 }
@@ -3829,6 +4076,20 @@ CStdString CGUIInfoManager::GetVideoLabel(int item)
           return m_currentFile->GetVideoInfoTag()->m_lastPlayed.GetAsLocalizedDateTime();
         break;
       }
+    /* PLEX */
+    case VIDEOPLAYER_AUDIOSTREAM:
+      {
+        if (g_application.CurrentFileItemPtr()->HasProperty("selectedAudioStream"))
+          return g_application.CurrentFileItemPtr()->GetProperty("selectedAudioStream").asString();
+        return g_localizeStrings.Get(1446);
+      }
+    case VIDEOPLAYER_SUBTITLESTREAM:
+      {
+        if (g_application.CurrentFileItemPtr()->HasProperty("selectedSubtitleStream"))
+          return g_application.CurrentFileItemPtr()->GetProperty("selectedSubtitleStream").asString();
+        return g_localizeStrings.Get(1446);
+      }
+    /* END PLEX */
     case VIDEOPLAYER_PLAYCOUNT:
       {
         CStdString strPlayCount;
@@ -3893,9 +4154,19 @@ CStdString CGUIInfoManager::GetCurrentPlayTimeRemaining(TIME_FORMAT format) cons
 
 void CGUIInfoManager::ResetCurrentItem()
 {
+  /* PLEX */
+  CStdString art;
+  if (m_currentFile->HasArt("thumb") && m_currentFile->GetArt("thumb") == "special://temp/airtunes_album_thumb.jpg")
+    art = m_currentFile->GetArt("thumb");
+  /* END PLEX */
   m_currentFile->Reset();
   m_currentMovieThumb = "";
   m_currentMovieDuration = "";
+
+  /* PLEX */
+  if (art.empty() == false)
+    m_currentFile->SetArt("thumb", art);
+  /* END PLEX */
 }
 
 void CGUIInfoManager::SetCurrentItem(CFileItem &item)
@@ -3934,6 +4205,10 @@ void CGUIInfoManager::SetCurrentAlbumThumb(const CStdString thumbFileName)
 void CGUIInfoManager::SetCurrentSong(CFileItem &item)
 {
   CLog::Log(LOGDEBUG,"CGUIInfoManager::SetCurrentSong(%s)",item.GetPath().c_str());
+  /* PLEX */
+  if (m_currentFile->HasArt("thumb") && m_currentFile->GetArt("thumb") == "special://temp/airtunes_album_thumb.jpg" && !item.HasArt("thumb"))
+    item.SetArt("thumb", m_currentFile->GetArt("thumb"));
+  /* END PLEX */
   *m_currentFile = item;
 
   m_currentFile->LoadMusicTag();
@@ -3955,15 +4230,27 @@ void CGUIInfoManager::SetCurrentSong(CFileItem &item)
       if (streamingItem.HasArt("thumb"))
         m_currentFile->SetArt("thumb", streamingItem.GetArt("thumb"));
     }
+    /* PLEX */
+    else
+    {
+      CFileItemList list;
+      list.Add(m_currentFile);
+
+      if (m_musicThumbLoader->IsLoading())
+        m_musicThumbLoader->StopThread();
+
+      m_musicThumbLoader->Load(list);
+    }
+    /* END PLEX */
   }
   else
   {
     CMusicThumbLoader loader;
-    loader.LoadItem(m_currentFile);
+    loader.LoadItem(m_currentFile.get());
   }
   m_currentFile->FillInDefaultIcon();
 
-  CMusicInfoLoader::LoadAdditionalTagInfo(m_currentFile);
+  CMusicInfoLoader::LoadAdditionalTagInfo(m_currentFile.get());
 }
 
 void CGUIInfoManager::SetCurrentMovie(CFileItem &item)
@@ -3977,7 +4264,11 @@ void CGUIInfoManager::SetCurrentMovie(CFileItem &item)
     CVideoDatabase dbs;
     if (dbs.Open())
     {
-      dbs.LoadVideoInfo(item.GetPath(), *m_currentFile->GetVideoInfoTag());
+      CStdString path = item.GetPath();
+      CStdString videoInfoTagPath(item.GetVideoInfoTag()->m_strFileNameAndPath);
+      if (videoInfoTagPath.Find("removable://") == 0)
+        path = videoInfoTagPath;
+      dbs.LoadVideoInfo(path, *m_currentFile->GetVideoInfoTag());
       dbs.Close();
     }
   }
@@ -3986,7 +4277,9 @@ void CGUIInfoManager::SetCurrentMovie(CFileItem &item)
   if (!item.HasArt("thumb"))
   {
     CVideoThumbLoader loader;
-    loader.LoadItem(m_currentFile);
+    /* PLEX */
+    loader.LoadItem(m_currentFile.get());
+    /* END PLEX */
   }
 
   // find a thumb for this stream
@@ -4078,6 +4371,7 @@ CTemperature CGUIInfoManager::GetGPUTemperature()
 // in the HTTP request user agent.
 CStdString CGUIInfoManager::GetVersion()
 {
+#ifndef __PLEX__
   CStdString tmp;
 #ifdef GIT_REV
   tmp.Format("%d.%d%s Git:%s", VERSION_MAJOR, VERSION_MINOR, VERSION_TAG, GIT_REV);
@@ -4085,6 +4379,9 @@ CStdString CGUIInfoManager::GetVersion()
   tmp.Format("%d.%d%s", VERSION_MAJOR, VERSION_MINOR, VERSION_TAG);
 #endif
   return tmp;
+#else
+  return PLEX_VERSION;
+#endif
 }
 
 CStdString CGUIInfoManager::GetBuild()
@@ -4213,6 +4510,13 @@ bool CGUIInfoManager::GetItemInt(int &value, const CGUIListItem *item, int info)
   if (info >= LISTITEM_PROPERTY_START && info - LISTITEM_PROPERTY_START < (int)m_listitemProperties.size())
   { // grab the property
     CStdString property = m_listitemProperties[info - LISTITEM_PROPERTY_START];
+    /* PLEX */
+    // If we don't have fanart (yet?) and we have fallback fanart, use it.
+    if (property == "fanart_image" &&
+        item->GetProperty(property).size() == 0 &&
+        item->GetProperty("fanart_image_fallback").size() > 0)
+      return item->GetProperty("fanart_image_fallback").asBoolean();
+    /* END PLEX */
     CStdString val = item->GetProperty(property).asString();
     value = atoi(val);
     return true;
@@ -4303,6 +4607,9 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
       return item->GetVideoInfoTag()->m_strTitle;
     if (item->HasMusicInfoTag())
       return item->GetMusicInfoTag()->GetTitle();
+    /* PLEX */
+    return item->GetLabel();
+    /* END PLEX */
     break;
   case LISTITEM_ORIGINALTITLE:
     if (item->HasVideoInfoTag())
@@ -4331,6 +4638,11 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
     }
   case LISTITEM_TRACKNUMBER:
     {
+      /* PLEX */
+      if (item->HasProperty("index"))
+        return item->GetProperty("index").asString();
+      /* END PLEX */
+
       CStdString track;
       if (item->HasMusicInfoTag())
         track.Format("%i", item->GetMusicInfoTag()->GetTrackNumber());
@@ -4445,7 +4757,13 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
   case LISTITEM_RATING:
     {
       CStdString rating;
-      if (item->HasVideoInfoTag() && item->GetVideoInfoTag()->m_fRating > 0.f) // movie rating
+      /* PLEX */
+      if (item->HasProperty("rating"))
+      {
+        rating.Format("%2.2f", item->GetProperty("rating").asDouble());
+      }
+      /* END PLEX */
+      else if (item->HasVideoInfoTag() && item->GetVideoInfoTag()->m_fRating > 0.f) // movie rating
         rating.Format("%.1f", item->GetVideoInfoTag()->m_fRating);
       else if (item->HasMusicInfoTag() && item->GetMusicInfoTag()->GetRating() > '0')
       { // song rating.  Images will probably be better than numbers for this in the long run
@@ -4471,6 +4789,16 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
       CStdString count;
       count.Format("%i", item->m_iprogramCount);
       return count;
+    }
+  case LISTITEM_DURATION_STRING:
+    {
+      if (item->HasVideoInfoTag())
+      {
+        if (item->GetVideoInfoTag()->GetDuration() > 0)
+          return StringUtils::SecondsToTimeString(item->GetVideoInfoTag()->GetDuration(), TIME_FORMAT_GUESS);
+      }
+      else
+        return GetItemLabel(item, LISTITEM_DURATION);
     }
   case LISTITEM_DURATION:
     {
@@ -4577,6 +4905,20 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
     break;
   case LISTITEM_ACTUAL_ICON:
     return item->GetIconImage();
+
+  /* PLEX */
+  case LISTITEM_BANNER:
+      return item->GetArt(PLEX_ART_BANNER);
+  case LISTITEM_THUMB0:
+  case LISTITEM_THUMB1:
+  case LISTITEM_THUMB2:
+  case LISTITEM_THUMB3:
+  case LISTITEM_THUMB4:
+      return item->GetArt(PLEX_ART_THUMB, info-LISTITEM_THUMB0);
+  case LISTITEM_GRANDPARENT_THUMB:
+    return item->GetArt(PLEX_ART_TVSHOW_THUMB);
+  /* END PLEX */
+
   case LISTITEM_ICON:
     {
       CStdString strThumb = item->GetArt("thumb");
@@ -4596,6 +4938,7 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
   case LISTITEM_PATH:
     {
       CStdString path;
+#ifndef __PLEX__
       if (item->IsMusicDb() && item->HasMusicInfoTag())
         URIUtils::GetDirectory(item->GetMusicInfoTag()->GetURL(), path);
       else if (item->IsVideoDb() && item->HasVideoInfoTag())
@@ -4615,6 +4958,18 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
       }
       CURL::Decode(path);
       return path;
+#else /* PLEX version */
+      if (item->HasProperty("localPath"))
+      {
+        URIUtils::GetDirectory(item->GetProperty("localPath").asString(), path);
+      }
+      else
+      {
+        URIUtils::GetDirectory(item->GetPath(), path);
+        path = CURL(path).GetWithoutUserDetails();
+        CURL::Decode(path);
+      }
+#endif
     }
   case LISTITEM_FILENAME_AND_PATH:
     {
@@ -4917,6 +5272,19 @@ CStdString CGUIInfoManager::GetItemLabel(const CFileItem *item, int info, CStdSt
         return dbid;
       }
     break;
+    /* PLEX */
+    case LISTITEM_STAR_DIFFUSE:
+      {
+        CStdString communityRatingColor = item->GetProperty("communityRatingColor").asString();
+        if (item->HasProperty("userRating"))
+          return "FFFFCC00";
+        else if (communityRatingColor.size() > 0)
+          return communityRatingColor;
+        else
+          return "FFFFFFFF";
+       }
+       break;
+    /* END PLEX */
   }
   return "";
 }
@@ -4943,7 +5311,11 @@ CStdString CGUIInfoManager::GetItemImage(const CFileItem *item, int info, CStdSt
       CStdString rating;
       if (item->HasVideoInfoTag())
       { // rating for videos is assumed 0..10, so convert to 0..5
+#ifndef __PLEX__
         rating.Format("rating%d.png", (long)((item->GetVideoInfoTag()->m_fRating * 0.5f) + 0.5f));
+#else
+        rating.Format("rating%d.png", (long)(item->GetVideoInfoTag()->m_fRating + 0.5f));
+#endif
       }
       else if (item->HasMusicInfoTag())
       { // song rating.
@@ -4957,6 +5329,7 @@ CStdString CGUIInfoManager::GetItemImage(const CFileItem *item, int info, CStdSt
   return GetItemLabel(item, info, fallback);
 }
 
+#ifndef __PLEX__
 bool CGUIInfoManager::GetItemBool(const CGUIListItem *item, int condition) const
 {
   if (!item) return false;
@@ -5054,6 +5427,7 @@ bool CGUIInfoManager::GetItemBool(const CGUIListItem *item, int condition) const
 
   return false;
 }
+#endif
 
 void CGUIInfoManager::ResetCache()
 {
@@ -5141,7 +5515,7 @@ void CGUIInfoManager::SetCurrentSlide(CFileItem &item)
 {
   if (m_currentSlide->GetPath() != item.GetPath())
   {
-    if (!item.HasPictureInfoTag() && !item.GetPictureInfoTag()->Loaded())
+    if (!item.GetPictureInfoTag()->Loaded()) // If picture metadata has not been loaded yet, load it now
       item.GetPictureInfoTag()->Load(item.GetPath());
     *m_currentSlide = item;
   }
@@ -5165,6 +5539,10 @@ bool CGUIInfoManager::CheckWindowCondition(CGUIWindow *window, int condition) co
 
 CGUIWindow *CGUIInfoManager::GetWindowWithCondition(int contextWindow, int condition) const
 {
+  // Home doesn't have a parent, so sometimes it comes through as 0.
+  if (contextWindow == 0)
+    contextWindow = WINDOW_HOME;
+
   CGUIWindow *window = g_windowManager.GetWindow(contextWindow);
   if (CheckWindowCondition(window, condition))
     return window;
@@ -5392,6 +5770,62 @@ bool CGUIInfoManager::ConditionsChangedValues(const std::map<int, bool>& map)
   }
   return false;
 }
+
+/* PLEX */
+bool CGUIInfoManager::GetItemBool(const CGUIListItem *item, int condition, int secondCondition) const
+{
+  if (!item) return false;
+  if (condition >= LISTITEM_PROPERTY_START && condition - LISTITEM_PROPERTY_START < (int)m_listitemProperties.size())
+  { // grab the property
+    CStdString property = m_listitemProperties[condition - LISTITEM_PROPERTY_START];
+    return item->GetProperty(property).asBoolean();
+  }
+  else if (condition == LISTITEM_ISPLAYING)
+  {
+    if (item->HasProperty("playlistposition"))
+      return (int)item->GetProperty("playlisttype").asInteger() == g_playlistPlayer.GetCurrentPlaylist() && (int)item->GetProperty("playlistposition").asInteger() == g_playlistPlayer.GetCurrentSong();
+    else if (item->IsFileItem() && !m_currentFile->GetPath().IsEmpty())
+    {
+      if (!g_application.m_strPlayListFile.IsEmpty())
+      {
+        //playlist file that is currently playing or the playlistitem that is currently playing.
+        return g_application.m_strPlayListFile.Equals(((const CFileItem *)item)->GetPath()) || m_currentFile->IsSamePath((const CFileItem *)item);
+      }
+      return m_currentFile->IsSamePath((const CFileItem *)item);
+    }
+  }
+  else if (condition == LISTITEM_TYPE)
+  {
+    uint32_t param = secondCondition > 0 ? secondCondition : condition;
+    if (param > m_stringParameters.size())
+      return false;
+    return CStdString(item->GetProperty("type").asString()).Equals(m_stringParameters[param]);
+  }
+  else if (condition == LISTITEM_STATUS)
+  {
+    CStdString lhs;
+    switch (item->GetOverlayImageID())
+    {
+    case CGUIListItem::ICON_OVERLAY_IN_PROGRESS: lhs = "inprogress"; break;
+    case CGUIListItem::ICON_OVERLAY_UNWATCHED: lhs = "unwatched"; break;
+    case CGUIListItem::ICON_OVERLAY_WATCHED: lhs = "watched"; break;
+    default: break;
+    }
+
+    uint32_t param = secondCondition > 0 ? secondCondition : condition;
+    if (param > m_stringParameters.size())
+      return false;
+    return lhs.CompareNoCase(m_stringParameters[param]) == 0;
+  }
+  else if (condition == LISTITEM_ISSELECTED)
+    return item->IsSelected();
+  else if (condition == LISTITEM_IS_FOLDER)
+    return item->m_bIsFolder;
+  else if (condition == LISTITEM_IS_RESUMABLE)
+    return (item->IsFileItem() && ((const CFileItem *)item)->HasVideoInfoTag() && ((const CFileItem *)item)->GetVideoInfoTag()->m_resumePoint.totalTimeInSeconds > 0);
+  return false;
+}
+/* END PLEX */
 
 bool CGUIInfoManager::GetEpgInfoTag(CEpgInfoTag& tag) const
 {

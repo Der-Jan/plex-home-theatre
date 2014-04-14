@@ -37,6 +37,18 @@
 #include <vector>
 #include "boost/shared_ptr.hpp"
 
+/* PLEX */
+#include <boost/enable_shared_from_this.hpp>
+
+class CFileItem;
+typedef boost::shared_ptr<CFileItem> CFileItemPtr;
+
+class CFileItemList;
+typedef boost::shared_ptr<CFileItemList> CFileItemListPtr;
+
+#include "plex/PlexTypes.h"
+/* END PLEX */
+
 namespace MUSIC_INFO
 {
   class CMusicInfoTag;
@@ -71,7 +83,7 @@ class CMediaSource;
   \sa CFileItemList
   */
 class CFileItem :
-  public CGUIListItem, public IArchivable, public ISerializable, public ISortable
+  public CGUIListItem, public IArchivable, public ISerializable, public ISortable, public boost::enable_shared_from_this<CFileItem> //PLEX
 {
 public:
   CFileItem(void);
@@ -104,11 +116,32 @@ public:
   virtual bool IsFileItem() const { return true; };
 
   bool Exists(bool bUseCache = true) const;
+  
+  /*!
+   \brief Check whether an item is a video item. Note that this returns true for
+    anything with a video info tag, so that may include eg. folders.
+   \return true if item is video, false otherwise. 
+   */
   bool IsVideo() const;
+
   bool IsDiscStub() const;
+
+  /*!
+   \brief Check whether an item is a picture item. Note that this returns true for
+    anything with a picture info tag, so that may include eg. folders.
+   \return true if item is picture, false otherwise. 
+   */
   bool IsPicture() const;
+
   bool IsLyrics() const;
+
+  /*!
+   \brief Check whether an item is an audio item. Note that this returns true for
+    anything with a music info tag, so that may include eg. folders.
+   \return true if item is audio, false otherwise. 
+   */
   bool IsAudio() const;
+
   bool IsKaraoke() const;
   bool IsCUESheet() const;
   bool IsLastFM() const;
@@ -386,6 +419,36 @@ public:
   int m_iHasLock; // 0 - no lock 1 - lock, but unlocked 2 - locked
   int m_iBadPwdCount;
 
+  /* PLEX */
+  std::vector<CFileItemPtr> m_contextItems;
+
+  /* Video->Media->mediaParts->mediaPartStreams */
+  std::vector<CFileItemPtr> m_mediaItems;
+  std::vector<CFileItemPtr> m_mediaParts;
+  std::vector<CFileItemPtr> m_mediaPartStreams;
+
+  CFileItemPtr m_selectedMediaPart;
+
+  bool IsPlexMediaServer() const;
+  bool IsRemoteSharedPlexMediaServerLibrary() const;
+  bool IsRemotePlexMediaServerLibrary() const;
+  virtual bool IsPlexMediaServerMusic() const;
+  bool IsPlexMediaServerLibrary() const;
+  bool IsPlexWebkit() const;
+
+  void AddProvider(const CFileItemPtr& provider) { m_chainedProviders.push_back(provider); }
+  std::vector<CFileItemPtr>& GetProviders() { return m_chainedProviders; }
+
+  void SetEpisodeData(int total, int watchedCount);
+
+  void MarkAsWatched(bool sendMessage=false);
+  void MarkAsUnWatched(bool sendMessage=false);
+
+  EPlexDirectoryType GetPlexDirectoryType() const { return m_plexDirectoryType; }
+  void SetPlexDirectoryType(EPlexDirectoryType dirType) { m_plexDirectoryType = dirType; }
+
+  /* END PLEX */
+
 private:
   CStdString m_strPath;            ///< complete path to item
 
@@ -403,6 +466,12 @@ private:
   PVR::CPVRTimerInfoTag * m_pvrTimerInfoTag;
   CPictureInfoTag* m_pictureInfoTag;
   bool m_bIsAlbum;
+  EPlexDirectoryType m_plexDirectoryType;
+
+  /* PLEX */
+protected:
+  std::vector<CFileItemPtr> m_chainedProviders;
+  /* END PLEX */
 };
 
 /*!
@@ -475,7 +544,7 @@ public:
   bool IsEmpty() const;
   void Append(const CFileItemList& itemlist);
   void Assign(const CFileItemList& itemlist, bool append = false);
-  bool Copy  (const CFileItemList& item);
+  bool Copy  (const CFileItemList& item, bool copyItems = true);
   void Reserve(int iCount);
   void Sort(SORT_METHOD sortMethod, SortOrder sortOrder);
   /* \brief Sorts the items based on the given sorting options
@@ -570,6 +639,16 @@ public:
   const CStdString &GetContent() const { return m_content; };
 
   void ClearSortState();
+
+  /* PLEX */
+  void Insert(int iIndex, CFileItemPtr pItem);
+  virtual bool IsPlexMediaServerMusic() const;
+  bool m_wasListingCancelled;
+  bool m_displayMessage;
+  CStdString m_displayMessageTitle;
+  CStdString m_displayMessageContents;
+  /* END PLEX */
+
 private:
   void Sort(FILEITEMLISTCOMPARISONFUNC func);
   void FillSortFields(FILEITEMFILLFUNC func);

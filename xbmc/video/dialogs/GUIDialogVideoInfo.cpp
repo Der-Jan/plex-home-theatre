@@ -49,6 +49,14 @@
 #include "video/VideoThumbLoader.h"
 #include "filesystem/Directory.h"
 
+/* PLEX */
+#include "filesystem/StackDirectory.h"
+#include "FileSystem/PlexDirectory.h"
+#include "PlexUtils.h"
+#include "pictures/Picture.h"
+#include "filesystem/CurlFile.h"
+/* END PLEX */
+
 using namespace std;
 using namespace XFILE;
 
@@ -239,6 +247,7 @@ void CGUIDialogVideoInfo::SetMovie(const CFileItem *item)
   // content type to determine visibility, so we'll set the wrong label)
   ClearCastList();
   VIDEODB_CONTENT_TYPE type = (VIDEODB_CONTENT_TYPE)m_movieItem->GetVideoContentType();
+#ifndef __PLEX__
   if (type == VIDEODB_CONTENT_MUSICVIDEOS)
   { // music video
     CMusicDatabase database;
@@ -257,6 +266,7 @@ void CGUIDialogVideoInfo::SetMovie(const CFileItem *item)
     m_castList->SetContent("musicvideos");
   }
   else
+#endif
   { // movie/show/episode
     for (CVideoInfoTag::iCast it = m_movieItem->GetVideoInfoTag()->m_cast.begin(); it != m_movieItem->GetVideoInfoTag()->m_cast.end(); ++it)
     {
@@ -481,6 +491,7 @@ void CGUIDialogVideoInfo::OnSearch(CStdString& strSearch)
 /// \param items Items Found
 void CGUIDialogVideoInfo::DoSearch(CStdString& strSearch, CFileItemList& items)
 {
+#ifndef __PLEX__
   CVideoDatabase db;
   if (!db.Open())
     return;
@@ -524,12 +535,14 @@ void CGUIDialogVideoInfo::DoSearch(CStdString& strSearch, CFileItemList& items)
   }
   CGUIWindowVideoBase::AppendAndClearSearchItems(movies, "[" + g_localizeStrings.Get(20391) + "] ", items);
   db.Close();
+#endif
 }
 
 /// \brief React on the selected search item
 /// \param pItem Search result item
 void CGUIDialogVideoInfo::OnSearchItemFound(const CFileItem* pItem)
 {
+#ifndef __PLEX__
   VIDEODB_CONTENT_TYPE type = (VIDEODB_CONTENT_TYPE)pItem->GetVideoContentType();
 
   CVideoDatabase db;
@@ -553,6 +566,7 @@ void CGUIDialogVideoInfo::OnSearchItemFound(const CFileItem* pItem)
   // refresh our window entirely
   Close();
   DoModal();
+#endif
 }
 
 void CGUIDialogVideoInfo::ClearCastList()
@@ -564,6 +578,7 @@ void CGUIDialogVideoInfo::ClearCastList()
 
 void CGUIDialogVideoInfo::Play(bool resume)
 {
+#ifndef __PLEX__
   if (!m_movieItem->GetVideoInfoTag()->m_strEpisodeGuide.IsEmpty())
   {
     CStdString strPath;
@@ -591,6 +606,11 @@ void CGUIDialogVideoInfo::Play(bool resume)
     }
     pWindow->PlayMovie(&movie);
   }
+#else
+  CFileItem movie(*m_movieItem);
+  CApplicationMessenger::Get().PlayFile(movie);
+  Close();
+#endif
 }
 
 string CGUIDialogVideoInfo::ChooseArtType(const CFileItem &videoItem, map<string, string> &currentArt)
@@ -636,6 +656,7 @@ string CGUIDialogVideoInfo::ChooseArtType(const CFileItem &videoItem, map<string
 
 void CGUIDialogVideoInfo::OnGetArt()
 {
+#ifndef __PLEX__
   map<string, string> currentArt;
   string type = ChooseArtType(*m_movieItem, currentArt);
   if (type.empty())
@@ -740,6 +761,7 @@ void CGUIDialogVideoInfo::OnGetArt()
   { // have a folder thumb to set as well
     VIDEO::CVideoInfoScanner::ApplyThumbToFolder(m_movieItem->GetProperty("set_folder_thumb").asString(), newThumb);
   }
+#endif
   m_hasUpdatedThumb = true;
 
   // Update our screen
@@ -749,6 +771,7 @@ void CGUIDialogVideoInfo::OnGetArt()
 // Allow user to select a Fanart
 void CGUIDialogVideoInfo::OnGetFanart()
 {
+#ifndef __PLEX__
   CFileItemList items;
 
   CFileItem item(*m_movieItem->GetVideoInfoTag());
@@ -836,7 +859,8 @@ void CGUIDialogVideoInfo::OnGetFanart()
   }
 
   CUtil::DeleteVideoDatabaseDirectoryCache(); // to get them new thumbs to show
-  m_movieItem->SetArt("fanart", result);
+#endif
+
   m_hasUpdatedThumb = true;
 
   // Update our screen
@@ -850,7 +874,7 @@ void CGUIDialogVideoInfo::PlayTrailer()
   *item.GetVideoInfoTag() = *m_movieItem->GetVideoInfoTag();
   item.GetVideoInfoTag()->m_streamDetails.Reset();
   item.GetVideoInfoTag()->m_strTitle.Format("%s (%s)",m_movieItem->GetVideoInfoTag()->m_strTitle.c_str(),g_localizeStrings.Get(20410));
-  CVideoThumbLoader::SetArt(item, m_movieItem->GetArt());
+  item.SetArt(m_movieItem->GetArt());
   item.GetVideoInfoTag()->m_iDbId = -1;
   item.GetVideoInfoTag()->m_iFileId = -1;
 
@@ -903,3 +927,65 @@ void CGUIDialogVideoInfo::AddItemPathToFileBrowserSources(VECSOURCES &sources, c
     sources.push_back(itemSource);
   }
 }
+
+/* PLEX */
+string CGUIDialogVideoInfo::OnGetMedia(const string& mediaType, const string& currentCachedMedia, int label)
+{
+  CFileItemList items;
+
+  // Current one.
+  if (currentCachedMedia.size() > 0 && CFile::Exists(currentCachedMedia))
+  {
+    CFileItemPtr itemCurrent(new CFileItem("media://Current", false));
+    itemCurrent->SetArt(PLEX_ART_THUMB, currentCachedMedia);
+    itemCurrent->SetLabel(g_localizeStrings.Get(label));
+    items.Add(itemCurrent);
+  }
+
+  // Get a list of available ones.
+  CFileItemList fileItems;
+  CPlexDirectory plexDir;
+  string url = m_movieItem->GetProperty("rootKey").c_str() + string("/") + mediaType;
+  plexDir.GetDirectory(url, fileItems);
+
+  m_mediaMap.clear();
+  for (int i=0; i<fileItems.Size(); i++)
+  {
+    CFileItemPtr item = fileItems.Get(i);
+    if (item->GetProperty("selected") == "0")
+    {
+      m_mediaMap[item->GetPath()] = item->GetProperty("ratingKey").asString();
+      item->SetLabel("");
+      items.Add(item);
+    }
+  }
+
+  // Have the user pick one.
+  CStdString result;
+  VECSOURCES sources(g_settings.m_videoSources);
+  g_mediaManager.GetLocalDrives(sources);
+  if (!CGUIDialogFileBrowser::ShowAndGetImageNoBrowse(items, sources, g_localizeStrings.Get(label), result))
+    return "";
+
+  if (result == "media://Current")
+    return "";
+
+  // Take the result and send it back, to the singular URL (e.g. PUT .../art)
+  CStdString selectedKey = m_mediaMap[result];
+  CURL::Encode(selectedKey);
+
+  CURL finalURL(CStdString(url.substr(0, url.size()-1)) + "?url=" + selectedKey);
+  finalURL.SetProtocol("http");
+  finalURL.SetPort(32400);
+
+  CStdString strData;
+
+  // Compute the new URL.
+  finalURL.SetFileName(strData.substr(1));
+  finalURL.SetOptions("");
+
+  //bool local = NetworkInterface::IsLocalAddress(finalURL.GetHostName());
+  //return XFILE::CPlexDirectory::BuildImageURL(url, finalURL.Get(), local);
+  return "";
+}
+/* END PLEX */

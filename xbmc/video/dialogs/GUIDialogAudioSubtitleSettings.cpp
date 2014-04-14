@@ -38,6 +38,10 @@
 #include "pvr/PVRManager.h"
 #include "cores/AudioEngine/Utils/AEUtil.h"
 
+/* PLEX */
+#include "PlexMediaDecisionEngine.h"
+/* END PLEX */
+
 using namespace std;
 using namespace XFILE;
 using namespace PVR;
@@ -96,6 +100,7 @@ void CGUIDialogAudioSubtitleSettings::CreateSettings()
   if (SupportsAudioFeature(IPC_AUD_SELECT_STREAM))
     AddAudioStreams(AUDIO_SETTINGS_STREAM);
 
+#ifndef __PLEX__
   // only show stuff available in digital mode if we have digital output
   if (SupportsAudioFeature(IPC_AUD_OUTPUT_STEREO))
     AddBool(AUDIO_SETTINGS_OUTPUT_TO_ALL_SPEAKERS, 252, &g_settings.m_currentVideoSettings.m_OutputToAllSpeakers, AUDIO_IS_BITSTREAM(g_guiSettings.GetInt("audiooutput.mode")));
@@ -104,9 +109,16 @@ void CGUIDialogAudioSubtitleSettings::CreateSettings()
   m_outputmode = g_guiSettings.GetInt("audiooutput.mode");
   if (SupportsAudioFeature(IPC_AUD_SELECT_OUTPUT))
     AddSpin(AUDIO_SETTINGS_DIGITAL_ANALOG, 337, &m_outputmode, 3, settings);
+#endif
 
   AddSeparator(7);
-  m_subtitleVisible = g_application.m_pPlayer->GetSubtitleVisible();
+  /* PLEX */
+  if (!g_application.m_pPlayer)
+    m_subtitleVisible = false;
+  else
+  /* END PLEX */
+    m_subtitleVisible = g_application.m_pPlayer->GetSubtitleVisible();
+
   AddBool(SUBTITLE_SETTINGS_ENABLE, 13397, &m_subtitleVisible);
   if (SupportsSubtitleFeature(IPC_SUBS_OFFSET))
     AddSlider(SUBTITLE_SETTINGS_DELAY, 22006, &g_settings.m_currentVideoSettings.m_SubtitleDelay, -g_advancedSettings.m_videoSubsDelayRange, 0.1f, g_advancedSettings.m_videoSubsDelayRange, FormatDelay);
@@ -114,7 +126,10 @@ void CGUIDialogAudioSubtitleSettings::CreateSettings()
     AddSubtitleStreams(SUBTITLE_SETTINGS_STREAM);
   if (SupportsSubtitleFeature(IPC_SUBS_EXTERNAL))
     AddButton(SUBTITLE_SETTINGS_BROWSER,13250);
+
+#ifndef __PLEX__ /* Not possible in Plex */
   AddButton(AUDIO_SETTINGS_MAKE_DEFAULT, 12376);
+#endif
 }
 
 void CGUIDialogAudioSubtitleSettings::AddAudioStreams(unsigned int id)
@@ -132,6 +147,7 @@ void CGUIDialogAudioSubtitleSettings::AddAudioStreams(unsigned int id)
 
   if( m_audioStream < 0 ) m_audioStream = 0;
 
+#ifndef __PLEX__
   // check if we have a single, stereo stream, and if so, allow us to split into
   // left, right or both
   if (!setting.max)
@@ -156,6 +172,7 @@ void CGUIDialogAudioSubtitleSettings::AddAudioStreams(unsigned int id)
       return;
     }
   }
+#endif
 
   // cycle through each audio stream and add it to our list control
   for (int i = 0; i <= setting.max; ++i)
@@ -306,7 +323,20 @@ void CGUIDialogAudioSubtitleSettings::OnSettingChanged(SettingInfo &setting)
       strPath = url.GetHostName();
     }
     else
+    {
       strPath = g_application.CurrentFileItem().GetPath();
+
+      /* PLEX */
+      // If we're inside the library, we'll need a different path.
+      CFileItemPtr fileItem = g_application.CurrentFileItemPtr();
+      if (fileItem)
+      {
+        CFileItemPtr mediaPart = CPlexMediaDecisionEngine::getMediaPart(*fileItem.get());
+        if (mediaPart && mediaPart->HasProperty("file"))
+          strPath = URIUtils::GetDirectory(mediaPart->GetProperty("file").asString());
+      }
+      /* END PLEX */
+    }
 
     CStdString strMask = ".utf|.utf8|.utf-8|.sub|.srt|.smi|.rt|.txt|.ssa|.aqt|.jss|.ass|.idx|.rar|.zip";
     if (g_application.GetCurrentPlayer() == EPC_DVDPLAYER)
@@ -396,6 +426,7 @@ CStdString CGUIDialogAudioSubtitleSettings::FormatDecibel(float value, float int
   return text;
 }
 
+#ifndef __PLEX__ /* More userfriendly version of the Delay format */
 CStdString CGUIDialogAudioSubtitleSettings::FormatDelay(float value, float interval)
 {
   CStdString text;
@@ -407,6 +438,24 @@ CStdString CGUIDialogAudioSubtitleSettings::FormatDelay(float value, float inter
     text.Format(g_localizeStrings.Get(22005).c_str(), value);
   return text;
 }
+#else
+CStdString CGUIDialogAudioSubtitleSettings::FormatDelay(float value, float interval)
+{
+  CStdString text;
+
+  int msValue = (int)(value*1000.0);
+  int error = msValue % 25;
+
+  if (abs(msValue) < 500.0*interval)
+    text.Format(g_localizeStrings.Get(22003).c_str(), 0);
+  else if (value < 0)
+    text.Format(g_localizeStrings.Get(22004).c_str(), abs(msValue-error));
+  else
+    text.Format(g_localizeStrings.Get(22005).c_str(), msValue-error);
+
+  return text;
+}
+#endif
 
 bool CGUIDialogAudioSubtitleSettings::SupportsAudioFeature(int feature)
 {

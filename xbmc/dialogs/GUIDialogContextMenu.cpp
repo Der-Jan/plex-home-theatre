@@ -233,6 +233,7 @@ void CGUIDialogContextMenu::SetupButtons()
 #endif
 }
 
+#ifndef __PLEX__
 void CGUIDialogContextMenu::SetPosition(float posX, float posY)
 {
   if (posY + GetHeight() > m_coordsRes.iHeight)
@@ -251,6 +252,14 @@ void CGUIDialogContextMenu::SetPosition(float posX, float posY)
 #endif
   CGUIDialog::SetPosition(posX, posY);
 }
+#else
+void CGUIDialogContextMenu::SetPosition(float posX, float posY)
+{
+  posX = (m_coordsRes.iWidth - GetWidth()) / 2;
+  posY = (m_coordsRes.iHeight - GetHeight()) / 2;
+  CGUIDialog::SetPosition(posX, posY);
+}
+#endif
 
 float CGUIDialogContextMenu::GetHeight() const
 {
@@ -308,8 +317,10 @@ void CGUIDialogContextMenu::GetContextButtons(const CStdString &type, const CFil
     {
       // We need to check if there is a detected is inserted!
       buttons.Add(CONTEXT_BUTTON_PLAY_DISC, 341); // Play CD/DVD!
+#ifndef __PLEX__
       if (CGUIWindowVideoBase::HasResumeItemOffset(item.get()))
         buttons.Add(CONTEXT_BUTTON_RESUME_DISC, CGUIWindowVideoBase::GetResumeString(*(item.get())));     // Resume Disc
+#endif
 
       buttons.Add(CONTEXT_BUTTON_EJECT_DISC, 13391);  // Eject/Load CD/DVD!
     }
@@ -342,17 +353,23 @@ void CGUIDialogContextMenu::GetContextButtons(const CStdString &type, const CFil
         if (plugin->HasSettings())
           buttons.Add(CONTEXT_BUTTON_PLUGIN_SETTINGS, 1045); // Plugin Settings
       }
+#ifndef __PLEX__
       if (type != "video")
         buttons.Add(CONTEXT_BUTTON_SET_DEFAULT, 13335); // Set as Default
+#endif
       if (!share->m_ignore && !isAddon)
         buttons.Add(CONTEXT_BUTTON_REMOVE_SOURCE, 522); // Remove Source
 
+#ifndef __PLEX__
       buttons.Add(CONTEXT_BUTTON_SET_THUMB, 20019);
+#endif
     }
     if (!GetDefaultShareNameByType(type).IsEmpty())
       buttons.Add(CONTEXT_BUTTON_CLEAR_DEFAULT, 13403); // Clear Default
 
+#ifndef __PLEX__
     buttons.Add(CONTEXT_BUTTON_ADD_SOURCE, 1026); // Add Source
+#endif
   }
   if (share && LOCK_MODE_EVERYONE != g_settings.GetMasterProfile().getLockMode())
   {

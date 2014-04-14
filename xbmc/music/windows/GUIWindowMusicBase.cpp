@@ -81,7 +81,7 @@ using namespace MUSIC_INFO;
 CGUIWindowMusicBase::CGUIWindowMusicBase(int id, const CStdString &xmlFile)
     : CGUIMediaWindow(id, xmlFile)
 {
-
+  m_dlgProgress = NULL;
 }
 
 CGUIWindowMusicBase::~CGUIWindowMusicBase ()
@@ -291,6 +291,7 @@ void CGUIWindowMusicBase::OnInfo(int iItem, bool bShowInfo)
 
 void CGUIWindowMusicBase::OnInfo(CFileItem *pItem, bool bShowInfo)
 {
+#ifndef __PLEX__
   if ((pItem->IsMusicDb() && !pItem->HasMusicInfoTag()) || pItem->IsParentFolder() ||
        URIUtils::IsSpecial(pItem->GetPath()) || pItem->GetPath().Left(14).Equals("musicsearch://"))
     return; // nothing to do
@@ -309,6 +310,7 @@ void CGUIWindowMusicBase::OnInfo(CFileItem *pItem, bool bShowInfo)
   // Try to find an album to lookup from the current item
   CAlbum album;
   CArtist artist;
+
   bool foundAlbum = false;
 
   album.idAlbum = -1;
@@ -387,12 +389,12 @@ void CGUIWindowMusicBase::OnInfo(CFileItem *pItem, bool bShowInfo)
     if (m_dlgProgress && bShowInfo)
       m_dlgProgress->Close();
   }
-
   if (album.idAlbum == -1 && foundAlbum == false)
     ShowArtistInfo(artist, pItem->GetPath(), false, bShowInfo);
   else
     ShowAlbumInfo(album, strPath, false, bShowInfo);
   m_musicdatabase.Close();
+#endif
 }
 
 void CGUIWindowMusicBase::OnManualAlbumInfo()
@@ -901,6 +903,9 @@ void CGUIWindowMusicBase::GetContextButtons(int itemNumber, CContextButtons &but
       else if (item->CanQueue() && !item->IsAddonsPath() && !item->IsScript())
       {
         buttons.Add(CONTEXT_BUTTON_QUEUE_ITEM, 13347); //queue
+        /* PLEX */
+        buttons.Add(CONTEXT_BUTTON_SHUFFLE, 191);
+        /* END PLEX */
 
         // allow a folder to be ad-hoc queued and played by the default player
         if (item->m_bIsFolder || (item->IsPlayList() &&
@@ -908,6 +913,7 @@ void CGUIWindowMusicBase::GetContextButtons(int itemNumber, CContextButtons &but
         {
           buttons.Add(CONTEXT_BUTTON_PLAY_ITEM, 208); // Play
         }
+#ifndef __PLEX__
         else
         { // check what players we have, if we have multiple display play with option
           VECPLAYERCORES vecCores;
@@ -915,6 +921,7 @@ void CGUIWindowMusicBase::GetContextButtons(int itemNumber, CContextButtons &but
           if (vecCores.size() >= 1)
             buttons.Add(CONTEXT_BUTTON_PLAY_WITH, 15213); // Play With...
         }
+#endif
         if (item->IsSmartPlayList())
         {
             buttons.Add(CONTEXT_BUTTON_PLAY_PARTYMODE, 15216); // Play in Partymode
@@ -932,11 +939,17 @@ void CGUIWindowMusicBase::GetContextButtons(int itemNumber, CContextButtons &but
 
 void CGUIWindowMusicBase::GetNonContextButtons(CContextButtons &buttons)
 {
+#ifndef __PLEX__
   if (!m_vecItems->IsVirtualDirectoryRoot())
     buttons.Add(CONTEXT_BUTTON_GOTO_ROOT, 20128);
+#endif
+
   if (g_playlistPlayer.GetPlaylist(PLAYLIST_MUSIC).size() > 0)
     buttons.Add(CONTEXT_BUTTON_NOW_PLAYING, 13350);
+
+#ifndef __PLEX__
   buttons.Add(CONTEXT_BUTTON_SETTINGS, 5);
+#endif
 }
 
 bool CGUIWindowMusicBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
@@ -1003,12 +1016,17 @@ bool CGUIWindowMusicBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
     }
 
   case CONTEXT_BUTTON_NOW_PLAYING:
-    g_windowManager.ActivateWindow(WINDOW_MUSIC_PLAYLIST);
+    /* PLEX added if statement and changed to WINDOW_NOW_PLAYING*/
+    if (g_application.IsPlayingAudio())
+      g_windowManager.ActivateWindow(WINDOW_NOW_PLAYING);
+
     return true;
 
+#ifndef __PLEX__
   case CONTEXT_BUTTON_GOTO_ROOT:
     Update("");
     return true;
+#endif
 
   case CONTEXT_BUTTON_SETTINGS:
     g_windowManager.ActivateWindow(WINDOW_SETTINGS_MYMUSIC);
@@ -1027,6 +1045,11 @@ bool CGUIWindowMusicBase::OnContextButton(int itemNumber, CONTEXT_BUTTON button)
       Refresh(true);
     }
     return true;
+  /* PLEX */
+  case CONTEXT_BUTTON_SHUFFLE:
+    OnShuffleItem(itemNumber);
+    return true;
+  /* END PLEX */
   default:
     break;
   }
@@ -1278,6 +1301,7 @@ void CGUIWindowMusicBase::UpdateThumb(const CAlbum &album, const CStdString &pat
 
 void CGUIWindowMusicBase::OnRetrieveMusicInfo(CFileItemList& items)
 {
+#ifndef __PLEX__ /* Not at all needed */
   if (items.GetFolderCount()==items.Size() || items.IsMusicDb() ||
      (!g_guiSettings.GetBool("musicfiles.usetags") && !items.IsCDDA()))
   {
@@ -1321,6 +1345,7 @@ void CGUIWindowMusicBase::OnRetrieveMusicInfo(CFileItemList& items)
 
   if (bProgressVisible && m_dlgProgress)
     m_dlgProgress->Close();
+#endif
 }
 
 bool CGUIWindowMusicBase::GetDirectory(const CStdString &strDirectory, CFileItemList &items)
@@ -1400,3 +1425,48 @@ CStdString CGUIWindowMusicBase::GetStartFolder(const CStdString &dir)
     return "special://musicplaylists/";
   return CGUIMediaWindow::GetStartFolder(dir);
 }
+
+/* PLEX */
+void CGUIWindowMusicBase::OnShuffleItem(int iItem)
+{
+  if ( iItem < 0 || iItem >= m_vecItems->Size() ) return ;
+
+  CFileItemPtr item(new CFileItem(*m_vecItems->Get(iItem)));
+
+  if (item->IsRAR() || item->IsZIP())
+    return;
+
+  // Clear the playlist
+  g_playlistPlayer.Reset();
+  g_playlistPlayer.SetCurrentPlaylist(PLAYLIST_MUSIC);
+  g_playlistPlayer.Clear();
+
+  //  Allow queuing of unqueueable items
+  //  when we try to queue them directly
+  if (!item->CanQueue())
+    item->SetCanQueue(true);
+
+  if (item->m_bIsFolder)
+  {
+    CLog::Log(LOGDEBUG, "Shuffling files %s%s and adding to music playlist", item->GetPath().c_str(), item->m_bIsFolder ? " (folder) " : "");
+    CFileItemList queuedItems;
+    AddItemToPlayList(item, queuedItems);
+    g_playlistPlayer.Add(PLAYLIST_MUSIC, queuedItems);
+  }
+  else
+  {
+    g_playlistPlayer.Add(PLAYLIST_MUSIC, *m_vecItems);
+  }
+
+  /*
+   // if party mode, add items but DONT start playing
+   if (g_partyModeManager.IsEnabled())
+   {
+   g_partyModeManager.AddUserSongs(queuedItems, false);
+   return;
+   }*/
+
+  g_playlistPlayer.SetShuffle(PLAYLIST_MUSIC, true, true);
+  g_playlistPlayer.Play();
+}
+/* END PLEX */

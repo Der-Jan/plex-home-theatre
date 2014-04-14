@@ -31,17 +31,21 @@
 #define HAS_DVD_SWSCALE
 #define HAS_DVDPLAYER
 #define HAS_EVENT_SERVER
-#define HAS_KARAOKE
+//#define HAS_KARAOKE
 #define HAS_SCREENSAVER
-#define HAS_PYTHON
+//#define HAS_PYTHON
 #define HAS_SYSINFO
 #define HAS_VIDEO_PLAYBACK
 #define HAS_VISUALISATION
+#ifndef __PLEX__
 #define HAS_PVRCLIENTS
+#endif
 
 #ifdef HAVE_LIBMICROHTTPD
 #define HAS_WEB_SERVER
+#ifndef __PLEX__
 #define HAS_WEB_INTERFACE
+#endif
 #endif
 
 #define HAS_JSONRPC
@@ -52,10 +56,10 @@
 
 #define HAS_FILESYSTEM
 #define HAS_FILESYSTEM_CDDA
-#define HAS_FILESYSTEM_RTV
-#define HAS_FILESYSTEM_DAAP
-#define HAS_FILESYSTEM_SAP
-#define HAS_FILESYSTEM_VTP
+//#define HAS_FILESYSTEM_RTV
+//#define HAS_FILESYSTEM_DAAP
+//#define HAS_FILESYSTEM_SAP
+//#define HAS_FILESYSTEM_VTP
 #define HAS_FILESYSTEM_HTSP
 
 #ifdef HAVE_LIBSMBCLIENT
@@ -91,10 +95,10 @@
  **********************/
 
 #if defined(TARGET_WINDOWS)
-  #define HAS_FILESYSTEM_RAR
+  //#define HAS_FILESYSTEM_RAR
 #else
   #if defined(HAVE_XBMC_NONFREE)
-    #define HAS_FILESYSTEM_RAR
+    //#define HAS_FILESYSTEM_RAR
   #endif
 #endif
 
@@ -104,28 +108,44 @@
 
 #if defined(TARGET_WINDOWS)
 #define HAS_SDL_JOYSTICK
+#ifndef __PLEX__
 #define HAS_DVD_DRIVE
+#endif
 #define HAS_WIN32_NETWORK
 #define HAS_IRSERVERSUITE
 #define HAS_AUDIO
+#ifndef __PLEX__
 #define HAVE_LIBCRYSTALHD 2
+#endif
 #define HAS_WEB_SERVER
 #define HAS_WEB_INTERFACE
+#ifndef __PLEX__
 #define HAVE_LIBSSH
+#endif
 #define HAS_LIBRTMP
+#ifndef __PLEX__
 #define HAVE_LIBBLURAY
+#endif
 #define HAS_ASAP_CODEC
 #define HAVE_YAJL_YAJL_VERSION_H
+#ifndef __PLEX__
 #define HAS_FILESYSTEM_SMB
 #define HAS_FILESYSTEM_NFS
+#endif
 #define HAS_ZEROCONF
 #define HAS_AIRPLAY
 #define HAS_AIRTUNES
 #define HAVE_LIBCEC
 #define HAVE_LIBMP3LAME
 #define HAVE_LIBVORBISENC
+#ifndef __PLEX__
 #define HAS_MYSQL
+#endif
 #define HAS_UPNP
+
+/* PLEX */
+#define ENABLE_AUTOUPDATE
+/* END PLEX */
 
 #define DECLARE_UNUSED(a,b) a b;
 #endif
@@ -193,13 +213,13 @@
  * Git revision
  *****************/
 
-#if defined(TARGET_DARWIN)
-#include "../git_revision.h"
-#endif
+//#if defined(TARGET_DARWIN)
+//#include "../git_revision.h"
+//#endif
 
-#ifndef GIT_REV
-#define GIT_REV "Unknown"
-#endif
+//#ifndef GIT_REV
+//#define GIT_REV "Unknown"
+//#endif
 
 /****************************************
  * Additional platform specific includes
@@ -250,6 +270,12 @@
 #ifdef HAVE_LIBGLESV2
 #undef HAS_GL
 #define HAS_GLES 2
+/* PLEX */
+#if defined(TARGET_RASPBERRY_PI)
+  #undef HAS_SDL_WIN_EVENTS
+  #define HAS_LINUX_EVENTS
+#endif
+/* END PLEX */
 #endif
 
 // GLES1.0 detected. Dont use GL!
@@ -259,7 +285,9 @@
 #endif
 
 #ifdef HAS_DVD_DRIVE
+#ifndef __PLEX__
 #define HAS_CDDA_RIPPER
+#endif
 #endif
 
 #define SAFE_DELETE(p)       do { delete (p);     (p)=NULL; } while (0)
@@ -271,4 +299,8 @@
 #define GET_R(color)            ((color >> 16) & 0xFF)
 #define GET_G(color)            ((color >>  8) & 0xFF)
 #define GET_B(color)            ((color >>  0) & 0xFF)
-
+/* PLEX */
+#if defined(TARGET_RASPBERRY_PI)
+  #undef HAS_SDL_JOYSTICK
+#endif
+/* END PLEX */

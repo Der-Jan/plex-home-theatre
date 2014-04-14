@@ -134,6 +134,10 @@ void CSettings::Initialize()
 
   m_musicNeedsUpdate = 0;
   m_videoNeedsUpdate = 0;
+
+  /* PLEX */
+  m_userAgent = "Plex Firefox/2.0.0.11";
+  /* END PLEX */
 }
 
 CSettings::~CSettings(void)
@@ -807,7 +811,11 @@ bool CSettings::LoadSettings(const CStdString& strSettingsFile)
   // setup any logging...
   if (g_guiSettings.GetBool("debug.showloginfo"))
   {
+#ifndef __PLEX__
     g_advancedSettings.m_logLevel = std::max(g_advancedSettings.m_logLevelHint, LOG_LEVEL_DEBUG_FREEMEM);
+#else
+    g_advancedSettings.m_logLevel = std::max(g_advancedSettings.m_logLevelHint, LOG_LEVEL_DEBUG);
+#endif
     CLog::Log(LOGNOTICE, "Enabled debug logging due to GUI setting (%d)", g_advancedSettings.m_logLevel);
   }
   else
@@ -1404,7 +1412,9 @@ void CSettings::LoadSources()
   if (pRootElement)
   {
     CStdString dummy;
+#ifndef __PLEX__
     GetSources(pRootElement, "programs", m_programSources, m_defaultProgramSource);
+#endif
     GetSources(pRootElement, "pictures", m_pictureSources, m_defaultPictureSource);
     GetSources(pRootElement, "files", m_fileSources, m_defaultFileSource);
     GetSources(pRootElement, "music", m_musicSources, m_defaultMusicSource);
@@ -1671,6 +1681,7 @@ void CSettings::CycleWatchMode(const CStdString& content)
 
 void CSettings::LoadUserFolderLayout()
 {
+#ifndef __PLEX__
   // check them all
   CStdString strDir = g_guiSettings.GetString("system.playlistspath");
   if (strDir == "set default")
@@ -1682,6 +1693,7 @@ void CSettings::LoadUserFolderLayout()
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"music"));
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"video"));
   CDirectory::Create(URIUtils::AddFileToFolder(strDir,"mixed"));
+#endif
 }
 
 CStdString CSettings::GetProfileUserDataFolder() const
@@ -1950,3 +1962,39 @@ void CSettings::LoadMasterForLogin()
   if (m_currentProfile != 0)
     LoadProfile(0);
 }
+
+/* PLEX */
+CStdString CSettings::GetPlexMediaServerThumbFolder() const
+{
+  CStdString folder;
+  if (GetCurrentProfile().hasDatabases())
+    URIUtils::AddFileToFolder(g_settings.GetProfileUserDataFolder(), "Thumbnails\\", folder);
+  else
+    URIUtils::AddFileToFolder(g_settings.GetUserDataFolder(), "Thumbnails\\", folder);
+
+  return folder;
+
+}
+
+CStdString CSettings::GetPlexMediaServerFanartFolder() const
+{
+  CStdString folder;
+  if (GetCurrentProfile().hasDatabases())
+    URIUtils::AddFileToFolder(g_settings.GetProfileUserDataFolder(), "Thumbnails\\", folder);
+  else
+    URIUtils::AddFileToFolder(g_settings.GetUserDataFolder(), "Thumbnails\\", folder);
+
+  return folder;
+}
+
+CStdString CSettings::GetProgramFanartFolder() const
+{
+  CStdString folder;
+  if (GetCurrentProfile().hasDatabases())
+    URIUtils::AddFileToFolder(GetProfileUserDataFolder(), "Thumbnails/Programs/Fanart", folder);
+  else
+    URIUtils::AddFileToFolder(GetUserDataFolder(), "Thumbnails/Programs/Fanart", folder);
+
+  return folder;
+}
+/* END PLEX */

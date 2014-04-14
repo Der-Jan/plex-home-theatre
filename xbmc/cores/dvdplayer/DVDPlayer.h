@@ -25,6 +25,10 @@
 
 #include "IDVDPlayer.h"
 
+/* PLEX */
+#include "Variant.h"
+/* END PLEX */
+
 #include "DVDMessageQueue.h"
 #include "DVDClock.h"
 #include "DVDPlayerAudio.h"
@@ -106,7 +110,11 @@ public:
   }
 };
 
+#ifndef __PLEX__
 typedef struct
+#else
+struct SelectionStream
+#endif
 {
   StreamType   type;
   int          type_index;
@@ -119,7 +127,41 @@ typedef struct
   int          id;
   std::string  codec;
   int          channels;
+
+
+  /* PLEX */
+  SelectionStream()
+    : plexID(-1)
+    , plexSubIndex(-1)
+  {}
+
+  SelectionStream& operator=(const SelectionStream& other)
+  {
+    // Preserve Plex ID by *not* copying over plexID member
+    type = other.type;
+    filename = other.filename;
+
+    // Stream language from Plex stream.
+    if (type != STREAM_SUBTITLE)
+      name = other.name;
+    else if (language.size() != 3)
+      name = language;
+
+    language = other.language;
+    id = other.id;
+    flags = other.flags;
+    source = other.source;
+
+    return *this;
+  }
+  int plexID;
+  int plexSubIndex;
+  /* END PLEX */
+#ifndef __PLEX__
 } SelectionStream;
+#else
+};
+#endif
 
 typedef std::vector<SelectionStream> SelectionStreams;
 
@@ -265,6 +307,23 @@ public:
   virtual int GetCacheLevel() const ;
 
   virtual int OnDVDNavResult(void* pData, int iMessage);
+
+  /* PLEX */
+  virtual int GetSubtitlePlexID();
+  virtual int GetAudioStreamPlexID();
+  virtual void SetAudioStreamPlexID(int plexID);
+  virtual void SetSubtitleStreamPlexID(int plexID);
+  virtual int GetPlexMediaPartID()
+  {
+    CFileItemPtr part = m_item.m_selectedMediaPart;
+    if (part)
+      return part->GetProperty("id").asInteger();
+
+    return -1;
+  }
+  virtual bool CanOpenAsync() { return false; }
+  virtual void Abort() { m_bAbortRequest = true; }
+  /* END PLEX */
 protected:
   friend class CSelectionStreams;
 
@@ -489,4 +548,19 @@ protected:
   } m_EdlAutoSkipMarkers;
 
   CPlayerOptions m_PlayerOptions;
+
+  /* PLEX */
+  void RelinkPlexStreams();
+
+  CStdString   m_strError;
+  CFileItemPtr m_itemWithDetails;
+  bool         m_hidingSub;
+  int          m_vobsubToDisplay;
+
+  unsigned int m_readRate;
+  void UpdateReadRate();
+  /* END PLEX */
+
+  bool m_HasVideo;
+  bool m_HasAudio;
 };

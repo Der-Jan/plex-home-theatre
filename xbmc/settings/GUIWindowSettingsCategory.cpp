@@ -72,7 +72,11 @@
 #endif
 #endif
 #if defined(TARGET_DARWIN_OSX)
+#ifndef __PLEX__
 #include "osx/XBMCHelper.h"
+#else
+#include "Helper/PlexHTHelper.h"
+#endif
 #endif
 #include "network/GUIDialogAccessPoints.h"
 #include "filesystem/Directory.h"
@@ -119,6 +123,21 @@
 #if defined(HAS_WEB_SERVER)
 #include "network/WebServer.h"
 #endif
+
+/* PLEX */
+#include "Client/MyPlex/MyPlexManager.h"
+#include "PlexUtils.h"
+#include "plex/GUI/GUIWindowMyPlex.h"
+#include "PlexApplication.h"
+#include "Client/PlexServerManager.h"
+#include "Client/PlexTranscoderClient.h"
+#include "Client/PlexServerDataLoader.h"
+#include "Client/PlexNetworkServiceBrowser.h"
+#include "AutoUpdate/PlexAutoUpdate.h"
+#include "plex/GUI/GUIWindowPlexStartupHelper.h"
+#include "PlexMediaDecisionEngine.h"
+#include "PlexAnalytics.h"
+/* END PLEX */
 
 using namespace std;
 using namespace XFILE;
@@ -416,6 +435,11 @@ void CGUIWindowSettingsCategory::CreateSettings()
         FillInEpgGuideView(pSetting);
       else if (strSetting.Equals("pvrplayback.startlast"))
         FillInPvrStartLastChannel(pSetting);
+      /* PLEX */
+      else if (strSetting.Equals("updates.channel"))
+        FillInPlexUpdateChannels(pSetting);
+      /* END PLEX */
+
       continue;
     }
 #ifdef HAS_WEB_SERVER
@@ -570,6 +594,29 @@ void CGUIWindowSettingsCategory::CreateSettings()
       FillInAudioDevices(pSetting,true);
       continue;
     }
+    /* PLEX */
+    else if (strSetting.Equals("updates.current"))
+    {
+      g_guiSettings.SetString("updates.current", g_infoManager.GetVersion());
+    }
+    else if (strSetting.Equals("plexmediaserver.remotequalitystr"))
+    {
+      if (g_guiSettings.GetInt("plexmediaserver.remotequality") == 0)
+        g_guiSettings.SetString("plexmediaserver.remotequalitystr", g_localizeStrings.Get(42999));
+    }
+    else if (strSetting.Equals("plexmediaserver.localqualitystr"))
+    {
+      if (g_guiSettings.GetInt("plexmediaserver.localquality") == 0)
+        g_guiSettings.SetString("plexmediaserver.localqualitystr", g_localizeStrings.Get(42999));
+    }
+    else if (strSetting.Equals("plexmediaserver.onlinemediaqualitystr"))
+    {
+      if (g_guiSettings.GetInt("plexmediaserver.onlinemediaquality") == 0)
+        g_guiSettings.SetString("plexmediaserver.onlinemediaqualitystr", g_localizeStrings.Get(13181));
+    }
+
+    /* END PLEX */
+
     AddSetting(pSetting, group->GetWidth(), iControlID);
   }
 
@@ -626,6 +673,10 @@ void CGUIWindowSettingsCategory::UpdateSettings()
           pControl->SetEnabled(true);
         else
           pControl->SetEnabled(false);
+
+        /* PLEX */
+        g_graphicsContext.UpdateDisplayBlanking();
+        /* END PLEX */
       }
     }
 #endif
@@ -642,6 +693,7 @@ void CGUIWindowSettingsCategory::UpdateSettings()
           CGUIDialogKaiToast::QueueNotification("DefaultIconWarning.png", g_localizeStrings.Get(33102), g_localizeStrings.Get(33100));
       }
 
+#ifndef __PLEX__
       // if XBMC helper is running, prompt user before effecting change
       if ( XBMCHelper::GetInstance().IsRunning() && XBMCHelper::GetInstance().GetMode()!=remoteMode )
       {
@@ -674,6 +726,40 @@ void CGUIWindowSettingsCategory::UpdateSettings()
         CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(pSettingControl->GetID());
         pControl->SetValue(APPLE_REMOTE_DISABLED);
       }
+#else
+      // if Plex helper is running, prompt user before effecting change
+      if ( PlexHTHelper::GetInstance().IsRunning() && PlexHTHelper::GetInstance().GetMode()!=remoteMode )
+      {
+        bool cancelled;
+        if (!CGUIDialogYesNo::ShowAndGetInput(13144, 13145, 13146, 13147, -1, -1, cancelled, 10000))
+        {
+          // user declined, restore previous spinner state and appleremote mode
+          CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(pSettingControl->GetID());
+          g_guiSettings.SetInt("input.appleremotemode", PlexHTHelper::GetInstance().GetMode());
+          pControl->SetValue(PlexHTHelper::GetInstance().GetMode());
+        }
+        else
+        {
+          // reload configuration
+          PlexHTHelper::GetInstance().Configure();
+        }
+      }
+      else
+      {
+        // set new configuration.
+        PlexHTHelper::GetInstance().Configure();
+      }
+
+      if (PlexHTHelper::GetInstance().ErrorStarting() == true)
+      {
+        // inform user about error
+        CGUIDialogOK::ShowAndGetInput(13620, 13621, 20022, 20022);
+
+        // reset spinner to disabled state
+        CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(pSettingControl->GetID());
+        pControl->SetValue(APPLE_REMOTE_DISABLED);
+      }
+#endif
     }
     else if (strSetting.Equals("input.appleremotealwayson"))
      {
@@ -1015,6 +1101,120 @@ void CGUIWindowSettingsCategory::UpdateSettings()
       if (pControl)
         pControl->SetEnabled(g_peripherals.GetNumberOfPeripherals() > 0);
     }
+
+    /* PLEX */
+    else if (strSetting.Equals("myplex.status"))
+    {
+      CGUIControl *pControl = (CGUIControl *)GetControl(GetSetting(strSetting)->GetID());
+      if (pControl)
+        pControl->SetEnabled(false);
+    }
+    else if (strSetting.Equals("myplex.signin"))
+    {
+      int label = g_plexApplication.myPlexManager->IsSignedIn() ? 44003 : 44100;
+
+      CGUIButtonControl *pControl = (CGUIButtonControl *)GetControl(GetSetting(strSetting)->GetID());
+      if (pControl)
+      {
+        pControl->SetLabel(g_localizeStrings.Get(label));
+      }
+    }
+    else if (strSetting.Equals("plexmediaserver.address"))
+    {
+      bool enabled = g_guiSettings.GetBool("plexmediaserver.manualaddress");
+      CGUIControl *pControl = (CGUIControl *)GetControl(pSettingControl->GetID());
+      if (pControl) pControl->SetEnabled(enabled);
+    }
+    else if (strSetting.Equals("plexmediaserver.port"))
+    {
+      bool enabled = g_guiSettings.GetBool("plexmediaserver.manualaddress");
+      CGUIControl *pControl = (CGUIControl *)GetControl(pSettingControl->GetID());
+      if (pControl) pControl->SetEnabled(enabled);      
+    }
+    else if (strSetting.Equals("advanced.labelvideo")||
+             strSetting.Equals("advanced.labelaudio")||
+             strSetting.Equals("advanced.labeldebug"))
+    {
+      CGUIControl *pControl = (CGUIControl *)GetControl(pSettingControl->GetID());
+      if (pControl) pControl->SetEnabled(false);
+    }
+
+    else if (strSetting.Equals("services.plexplayer"))
+    {
+      CGUIControl* pControl = (CGUIControl*)GetControl(pSettingControl->GetID());
+      if (pControl) pControl->SetEnabled(g_guiSettings.GetBool("services.webserver"));
+    }
+
+    else if (strSetting.Equals("backgroundmusic.bgmusicenabled"))
+    {
+//      if (g_guiSettings.GetBool("backgroundmusic.bgmusicenabled"))
+//        g_plexApplication.backgroundMusicPlayer->PlayElevatorMusic();
+//      else
+//        g_plexApplication.backgroundMusicPlayer->Die();
+    }
+    else if (strSetting.Equals("updates.checknow"))
+    {
+      CGUIButtonControl *pControl = (CGUIButtonControl*)GetControl(pSettingControl->GetID());
+      if (pControl)
+      {
+#ifdef ENABLE_AUTOUPDATE
+        if (g_plexApplication.autoUpdater->IsReadyToInstall())
+        {
+          pControl->SetEnabled(true);
+          pControl->SetLabel(g_localizeStrings.Get(40018));
+        }
+        else
+        {
+          if (g_plexApplication.autoUpdater->IsSearchingForUpdate())
+          {
+            if (GetFocusedControlID() == pControl->GetID())
+            {
+              BaseSettingControlPtr channel = GetSetting("updates.channel");
+              if (channel)
+                SET_CONTROL_FOCUS(channel->GetID(), 0);
+            }
+            pControl->SetEnabled(false);
+            pControl->SetLabel(g_localizeStrings.Get(40001));
+          }
+          else if (g_plexApplication.autoUpdater->IsDownloadingUpdate())
+          {
+            pControl->SetEnabled(false);
+            CStdString dl;
+            dl.Format(g_localizeStrings.Get(40030), g_plexApplication.autoUpdater->GetDownloadPercentage());
+            pControl->SetLabel(dl);
+          }
+          else
+          {
+            pControl->SetEnabled(true);
+            pControl->SetLabel(g_localizeStrings.Get(40016));
+          }
+        }
+#endif
+      }
+    }
+    else if (strSetting.Equals("updates.current"))
+    {
+      CGUIButtonControl *pControl = (CGUIButtonControl *)GetControl(GetSetting(strSetting)->GetID());
+      if (pControl)
+      {
+        pControl->SetEnabled(false);
+      }
+
+#ifdef ENABLE_AUTOUPDATE
+      if (g_plexApplication.autoUpdater->IsReadyToInstall())
+      {
+        pControl->SetLabel(g_localizeStrings.Get(40028));
+        g_guiSettings.SetString("updates.current", g_plexApplication.autoUpdater->GetUpdateVersion());
+      }
+      else
+      {
+        pControl->SetLabel(g_localizeStrings.Get(40029));
+        g_guiSettings.SetString("updates.current", g_infoManager.GetVersion());
+      }
+#endif
+    }
+    /* END PLEX */
+
     else if (strSetting.Equals("input.enablejoystick"))
     {
       CGUIControl *pControl = (CGUIControl *)GetControl(pSettingControl->GetID());
@@ -1132,6 +1332,25 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
   {
     g_advancedSettings.SetDebugMode(g_guiSettings.GetBool("debug.showloginfo"));
   }
+/* PLEX */
+  else if (strSetting.Equals("debug.networklogging"))
+  {
+    g_plexApplication.setNetworkLogging(g_guiSettings.GetBool("debug.networklogging"));
+    g_advancedSettings.SetDebugMode(g_guiSettings.GetBool("debug.networklogging"));
+  }
+  else if (strSetting.Equals("debug.visualizedirtyregions"))
+  {
+    g_advancedSettings.SetVisualizeDirtyRegions(g_guiSettings.GetBool("debug.visualizedirtyregions"));
+  }
+  else if (strSetting.Equals("debug.visualizedirtyregions"))
+  {
+    g_advancedSettings.SetDirtyRegionsAlgorithm(g_guiSettings.GetInt("debug.dirtyregionsalgorithm"));
+  }
+  else if (strSetting.Equals("debug.dirtyregionsnofliptimeout"))
+  {
+    g_advancedSettings.SetDirtyRegionsNoFlipTimeout(g_guiSettings.GetInt("debug.dirtyregionsnofliptimeout"));
+  }
+/* END PLEX */
   /*else if (strSetting.Equals("musicfiles.repeat"))
   {
     g_playlistPlayer.SetRepeat(PLAYLIST_MUSIC_TEMP, g_guiSettings.GetBool("musicfiles.repeat") ? PLAYLIST::REPEAT_ALL : PLAYLIST::REPEAT_NONE);
@@ -1277,7 +1496,7 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
       {
         CGUIDialogOK::ShowAndGetInput(g_localizeStrings.Get(33101), "", g_localizeStrings.Get(33100), "");
         g_guiSettings.SetBool("services.webserver", false);
-      }
+      }    
   }
   else if (strSetting.Equals("services.webserverusername") || strSetting.Equals("services.webserverpassword"))
   {
@@ -1317,6 +1536,10 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
         CZeroconf::GetInstance()->Start();
       }
 #endif //HAS_ZEROCONF
+      /* PLEX */
+      CGUIDialogOK::ShowAndGetInput("Important!", "Note that receiving video content from iOS7 might not work.", "", "");
+      /* END PLEX */
+
       g_application.StartAirplayServer();//will stop the server before internal
     }
     else
@@ -1733,7 +1956,11 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
   else if (strSetting.Equals("services.esport"))
   {
 #ifdef HAS_EVENT_SERVER
+#ifndef __PLEX__
     ValidatePortNumber(pSettingControl, "9777", "9777");
+#else
+    ValidatePortNumber(pSettingControl, "9778", "9778");
+#endif
     //restart eventserver without asking user
     if (g_application.StopEventServer(true, false))
     {
@@ -1742,7 +1969,11 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
     }
 #if defined(TARGET_DARWIN_OSX)
     //reconfigure XBMCHelper for port changes
+#ifndef __PLEX__
     XBMCHelper::GetInstance().Configure();
+#else
+    PlexHTHelper::GetInstance().Configure();
+#endif
 #endif
 #endif
   }
@@ -2009,6 +2240,114 @@ void CGUIWindowSettingsCategory::OnSettingChanged(BaseSettingControlPtr pSetting
       }
     }
   }
+
+  /* PLEX */
+  else if (strSetting.Equals("myplex.status"))
+  {
+    CGUIControl *pControl = (CGUIControl *)GetControl(pSettingControl->GetID());
+    if (pControl)
+      pControl->SetEnabled(false);
+  }
+  else if (strSetting.Equals("myplex.signin"))
+  {
+    CGUIButtonControl* pControl = (CGUIButtonControl *)GetControl(pSettingControl->GetID());
+    CSettingString*    pSettingString = (CSettingString* )pSettingControl->GetSetting();
+
+    if (!g_plexApplication.myPlexManager->IsSignedIn())
+    {
+      g_windowManager.ActivateWindow(WINDOW_MYPLEX_LOGIN);
+    }
+    else
+    {
+      g_plexApplication.myPlexManager->Logout();
+      pControl->SetLabel(g_localizeStrings.Get(44003));
+      pSettingString->SetLabel(44003);
+    }
+  }
+  else if (strSetting.Equals("myplex.hidecloudsync"))
+  {
+    g_plexApplication.myPlexManager->Rescan();
+  }
+  else if (strSetting.Equals("backgroundmusic.thememusicenabled") || strSetting.Left(23).Equals("backgroundmusic.bgmusic"))
+  {
+    CGUIMessage msg(GUI_MSG_BG_MUSIC_SETTINGS_UPDATED, 0, 0);
+    g_windowManager.SendMessage(msg);
+  }
+  else if (strSetting.Equals("plexmediaserver.localqualitystr"))
+  {
+    int quality = CPlexTranscoderClient::SelectATranscoderQuality(CPlexServerPtr(), g_guiSettings.GetInt("plexmediaserver.localquality"));
+    g_guiSettings.SetInt("plexmediaserver.localquality", quality);
+    if (quality > 0)
+      g_guiSettings.SetString("plexmediaserver.localqualitystr", CPlexTranscoderClient::GetPrettyBitrate(quality).c_str());
+    else
+      g_guiSettings.SetString("plexmediaserver.localqualitystr", g_localizeStrings.Get(42999));
+  }
+  else if (strSetting.Equals("plexmediaserver.remotequalitystr"))
+  {
+    int quality = CPlexTranscoderClient::SelectATranscoderQuality(CPlexServerPtr(), g_guiSettings.GetInt("plexmediaserver.remotequality"));
+    g_guiSettings.SetInt("plexmediaserver.remotequality", quality);
+    if (quality > 0)
+      g_guiSettings.SetString("plexmediaserver.remotequalitystr", CPlexTranscoderClient::GetPrettyBitrate(quality).c_str());
+    else
+      g_guiSettings.SetString("plexmediaserver.remotequalitystr", g_localizeStrings.Get(42999));
+  }
+  else if (strSetting.Equals("plexmediaserver.onlinemediaqualitystr"))
+  {
+    int quality = CPlexTranscoderClient::SelectAOnlineQuality(g_guiSettings.GetInt("plexmediaserver.onlinemediaquality"));
+    PlexIntStringMap q = CPlexTranscoderClient::getOnlineQualties();
+    g_guiSettings.SetInt("plexmediaserver.onlinemediaquality", quality);
+    g_guiSettings.SetString("plexmediaserver.onlinemediaqualitystr", q[quality].c_str());
+  }
+  // Check manual server.
+  else if (strSetting.Equals("plexmediaserver.manualaddress") || strSetting.Equals("plexmediaserver.address"))
+  {
+    g_plexApplication.serverManager->m_manualServerManager.checkManualServersAsync();
+  }
+  else if (strSetting.Equals("plexmediaserver.port"))
+  {
+    ValidatePortNumber(pSettingControl, "32400", "32400", false);
+    g_plexApplication.serverManager->m_manualServerManager.checkManualServersAsync();
+  }
+  else if (strSetting.Equals("myplex.enablequeueandrec"))
+  {
+    CPlexServerPtr myPlex = g_plexApplication.serverManager->FindByUUID("myplex");
+    if (myPlex)
+    {
+      if (g_guiSettings.GetBool(strSetting))
+        g_plexApplication.dataLoader->LoadDataFromServer(myPlex);
+      else
+        g_plexApplication.dataLoader->RemoveServer(myPlex);
+    }
+  }
+  else if (strSetting.Equals("services.plexplayer"))
+  {
+    if (g_guiSettings.GetBool(strSetting))
+      g_plexApplication.GetServiceListener()->StartAdvertisement();
+    else
+      g_plexApplication.GetServiceListener()->StopAdvertisement();
+  }
+  else if (strSetting.Equals("updates.checknow"))
+  {
+#ifdef ENABLE_AUTOUPDATE
+    if (g_plexApplication.autoUpdater->IsReadyToInstall())
+      g_plexApplication.autoUpdater->UpdateAndRestart();
+    else
+      g_plexApplication.autoUpdater->ForceVersionCheckInBackground();
+#endif
+  }
+  else if (strSetting.Equals("updates.channel"))
+  {
+    CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(pSettingControl->GetID());
+    g_guiSettings.SetInt("updates.channel", pControl->GetValue());
+  }
+  else if (strSetting.Equals("advanced.collectanalytics"))
+  {
+    if (g_guiSettings.GetBool(strSetting))
+      g_plexApplication.analytics->startLogging();
+    else
+      g_plexApplication.analytics->stopLogging();
+  }
+  /* END PLEX */
 
   UpdateSettings();
 }
@@ -2571,6 +2910,9 @@ void CGUIWindowSettingsCategory::FillInLanguages(CSetting *pSetting, const std::
       if (strcmpi(pItem->GetLabel().c_str(), ".svn") == 0) continue;
       if (strcmpi(pItem->GetLabel().c_str(), "fonts") == 0) continue;
       if (strcmpi(pItem->GetLabel().c_str(), "media") == 0) continue;
+      /* PLEX - Ignore plex languages */
+      if (pItem->GetLabel().Find("_plex") != -1) continue;
+      /* END PLEX */
       vecLanguage.push_back(pItem->GetLabel());
     }
   }
@@ -3011,3 +3353,37 @@ void CGUIWindowSettingsCategory::ValidatePortNumber(BaseSettingControlPtr pSetti
     pSetting->SetData(privPort.c_str());
   }
 }
+
+/* PLEX */
+void CGUIWindowSettingsCategory::FillInPlexUpdateChannels(CSetting *pSetting)
+{
+  CSettingInt *pSettingInt = (CSettingInt*)pSetting;
+  CGUISpinControlEx *pControl = (CGUISpinControlEx *)GetControl(GetSetting(pSetting->GetSetting())->GetID());
+
+  pControl->SetType(SPIN_CONTROL_TYPE_TEXT);
+  pControl->Clear();
+
+  CMyPlexUserInfo user = g_plexApplication.myPlexManager->GetCurrentUserInfo();
+
+  pControl->AddLabel(g_localizeStrings.Get(40003), CMyPlexUserInfo::ROLE_USER);
+
+#ifdef TARGET_RASPBERRY_PI
+  pControl->AddLabel("PreRelease", CMyPlexUserInfo::ROLE_EMPLOYEE);
+#else
+  if (user.hasRole(CMyPlexUserInfo::ROLE_PLEXPASS) || user.hasRole(CMyPlexUserInfo::ROLE_NINJA) || user.hasRole(CMyPlexUserInfo::ROLE_EMPLOYEE))
+    pControl->AddLabel(g_localizeStrings.Get(40004), CMyPlexUserInfo::ROLE_PLEXPASS);
+#endif
+
+  if (user.hasRole(CMyPlexUserInfo::ROLE_NINJA) || user.hasRole(CMyPlexUserInfo::ROLE_EMPLOYEE))
+    pControl->AddLabel(g_localizeStrings.Get(40005), CMyPlexUserInfo::ROLE_NINJA);
+
+  if (user.hasRole(CMyPlexUserInfo::ROLE_EMPLOYEE))
+    pControl->AddLabel(g_localizeStrings.Get(40006), CMyPlexUserInfo::ROLE_EMPLOYEE);
+
+  if (pControl->GetMaximum() < 1)
+    /* only one choice */
+    pControl->SetEnabled(false);
+
+  pControl->SetValue(pSettingInt->GetData());
+}
+/* END PLEX */

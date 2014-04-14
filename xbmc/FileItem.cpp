@@ -58,6 +58,13 @@
 #include "music/karaoke/karaokelyricsfactory.h"
 #include "utils/Mime.h"
 
+/* PLEX */
+#include "plex/PlexTypes.h"
+#include "PlexApplication.h"
+#include "filesystem/DirectoryCache.h"
+#include "FileSystem/PlexFile.h"
+/* END PLEX */
+
 using namespace std;
 using namespace XFILE;
 using namespace PLAYLIST;
@@ -372,6 +379,10 @@ CFileItem::CFileItem(const CMediaSource& share)
   SetLabelPreformated(true);
   if (IsDVD())
     GetVideoInfoTag()->m_strFileNameAndPath = share.strDiskUniqueId; // share.strDiskUniqueId contains disc unique id
+
+  /* PLEX */
+  SetArt(PLEX_ART_FANART, share.m_strFanArtUrl);
+  /* END PLEX */
 }
 
 CFileItem::~CFileItem(void)
@@ -391,6 +402,14 @@ CFileItem::~CFileItem(void)
   m_pvrRecordingInfoTag = NULL;
   m_pvrTimerInfoTag = NULL;
   m_pictureInfoTag = NULL;
+
+  /* PLEX */
+  m_contextItems.clear();
+  m_mediaParts.clear();
+  m_mediaItems.clear();
+  m_mediaPartStreams.clear();
+  m_selectedMediaPart.reset();
+  /* END PLEX */
 }
 
 const CFileItem& CFileItem::operator=(const CFileItem& item)
@@ -513,6 +532,24 @@ const CFileItem& CFileItem::operator=(const CFileItem& item)
   m_extrainfo = item.m_extrainfo;
   m_specialSort = item.m_specialSort;
   m_bIsAlbum = item.m_bIsAlbum;
+
+  /* PLEX */
+  m_contextItems.clear();
+  for (unsigned int i=0; i < item.m_contextItems.size(); ++i)
+  {
+    m_contextItems.push_back(item.m_contextItems[i]);
+  }
+
+  m_mapProperties.clear();
+  m_mapProperties = item.m_mapProperties;
+  m_mediaParts = item.m_mediaParts;
+  m_mediaItems = item.m_mediaItems;
+  m_mediaPartStreams = item.m_mediaPartStreams;
+
+  m_plexDirectoryType = item.m_plexDirectoryType;
+  m_selectedMediaPart = item.m_selectedMediaPart;
+  /* END PLEX */
+
   return *this;
 }
 
@@ -560,8 +597,18 @@ void CFileItem::Reset()
   delete m_pictureInfoTag;
   m_pictureInfoTag=NULL;
   m_extrainfo.Empty();
+
   m_specialSort = SortSpecialNone;
   ClearProperties();
+
+  /* PLEX */
+  m_mediaItems.clear();
+  m_mediaParts.clear();
+  m_mediaPartStreams.clear();
+  m_selectedMediaPart.reset();
+  m_plexDirectoryType = PLEX_DIR_TYPE_UNKNOWN;
+  /* END PLEX */
+
   SetInvalid();
 }
 
@@ -615,6 +662,15 @@ void CFileItem::Archive(CArchive& ar)
     }
     else
       ar << 0;
+
+    /* PLEX */
+    ar << (int)(m_contextItems.size());
+    for (unsigned int i=0; i < m_contextItems.size(); ++i)
+    {
+      CFileItemPtr pContextItem = m_contextItems[i];
+      ar << *pContextItem;
+    }
+    /* END PLEX */
   }
   else
   {
@@ -637,7 +693,6 @@ void CFileItem::Archive(CArchive& ar)
     m_iLockMode = (LockType)temp;
     ar >> m_strLockCode;
     ar >> m_iBadPwdCount;
-
     ar >> m_bCanQueue;
     ar >> m_mimetype;
     ar >> m_extrainfo;
@@ -654,6 +709,21 @@ void CFileItem::Archive(CArchive& ar)
     ar >> iType;
     if (iType == 1)
       ar >> *GetPictureInfoTag();
+
+    /* PLEX */
+    int iContextMenuSize = 0;
+    ar >> iContextMenuSize;
+    if (iContextMenuSize > 0)
+    {
+      m_contextItems.reserve(iContextMenuSize);
+      for (int i=0; i < iContextMenuSize; ++i)
+      {
+        CFileItemPtr pItem(new CFileItem);
+        ar >> *pItem;
+        m_contextItems.push_back(pItem);
+      }
+    }
+    /* END PLEX */
 
     SetInvalid();
   }
@@ -756,6 +826,15 @@ bool CFileItem::Exists(bool bUseCache /* = true */) const
 
 bool CFileItem::IsVideo() const
 {
+  /* PLEX */
+  string type = GetProperty("type").asString();
+  if (type == "episode" || type == "movie" || type == "clip")
+    return true;
+
+  if (type == "photo")
+    return false;
+  /* END PLEX */
+
   /* check preset mime type */
   if( m_mimetype.Left(6).Equals("video/") )
     return true;
@@ -834,6 +913,12 @@ bool CFileItem::IsDiscStub() const
 
 bool CFileItem::IsAudio() const
 {
+  /* PLEX */
+  string type = GetProperty("album_type").asString();
+  if (type == "track")
+    return true;
+  /* END PLEX */
+
   /* check preset mime type */
   if( m_mimetype.Left(6).Equals("audio/") )
     return true;
@@ -876,6 +961,10 @@ bool CFileItem::IsPicture() const
 {
   if( m_mimetype.Left(6).Equals("image/") )
     return true;
+
+  /* PLEX */
+  if (GetProperty("type") == "image" || GetProperty("type") == "photo") return true;
+  /* END PLEX */
 
   if (HasPictureInfoTag()) return true;
   if (HasMusicInfoTag()) return false;
@@ -1322,6 +1411,7 @@ void CFileItem::SetLabel(const CStdString &strLabel)
   CGUIListItem::SetLabel(strLabel);
 }
 
+#ifndef __PLEX__
 void CFileItem::SetFileSizeLabel()
 {
   if( m_bIsFolder && m_dwSize == 0 )
@@ -1329,6 +1419,18 @@ void CFileItem::SetFileSizeLabel()
   else
     SetLabel2(StringUtils::SizeToString(m_dwSize));
 }
+#else
+void CFileItem::SetFileSizeLabel()
+{
+  if (!m_bLabelPreformated)
+  {
+    if( m_bIsFolder && m_dwSize == 0 )
+      SetLabel2("");
+    else
+      SetLabel2(StringUtils::SizeToString(m_dwSize));
+  }
+}
+#endif
 
 CURL CFileItem::GetAsUrl() const
 {
@@ -1357,6 +1459,16 @@ const CStdString& CFileItem::GetMimeType(bool lookup /*= true*/) const
     // discard const qualifyier
     CStdString& m_ref = (CStdString&)m_mimetype;
 
+    /* PLEX */
+    CURL url = GetAsUrl();
+    if (url.GetProtocol() == "plexserver" ||
+        // We also need to check for transcoder URL's since they are translated
+        // to HTTP already (ffmpeg doesn't like plexserver:// url's
+        boost::starts_with(url.GetFileName(), "video/:/transcode"))
+      m_ref = XFILE::CPlexFile::GetMimeType(GetAsUrl());
+    else
+    /* END PLEX */
+
     if( m_bIsFolder )
       m_ref = "x-directory/normal";
     else if( m_pvrChannelInfoTag )
@@ -1365,15 +1477,7 @@ const CStdString& CFileItem::GetMimeType(bool lookup /*= true*/) const
           || m_strPath.Left(7).Equals("http://")
           || m_strPath.Left(8).Equals("https://"))
     {
-      CCurlFile::GetMimeType(GetAsUrl(), m_ref);
-
-      // try to get mime-type again but with an NSPlayer User-Agent
-      // in order for server to provide correct mime-type.  Allows us
-      // to properly detect an MMS stream
-      if (m_ref.Left(11).Equals("video/x-ms-"))
-        CCurlFile::GetMimeType(GetAsUrl(), m_ref, "NSPlayer/11.00.6001.7000");
-
-      // make sure there are no options set in mime-type
+     // make sure there are no options set in mime-type
       // mime-type can look like "video/x-ms-asf ; charset=utf8"
       int i = m_ref.Find(';');
       if(i>=0)
@@ -1394,6 +1498,8 @@ const CStdString& CFileItem::GetMimeType(bool lookup /*= true*/) const
     CStdString& m_path = (CStdString&)m_strPath;
     m_path.Replace("http:", "mms:");
   }
+
+  CLog::Log(LOGDEBUG, "Mimetype: %s", m_mimetype.c_str());
 
   return m_mimetype;
 }
@@ -1536,6 +1642,13 @@ CFileItemList::CFileItemList()
   m_sortOrder = SortOrderNone;
   m_sortIgnoreFolders = false;
   m_replaceListing = false;
+
+  /* PLEX */
+  m_wasListingCancelled = false;
+  m_displayMessage = false;
+  m_displayMessageTitle = "";
+  m_displayMessageContents = "";
+  /* END PLEX */
 }
 
 CFileItemList::CFileItemList(const CStdString& strPath) : CFileItem(strPath, true)
@@ -1546,6 +1659,13 @@ CFileItemList::CFileItemList(const CStdString& strPath) : CFileItem(strPath, tru
   m_sortOrder = SortOrderNone;
   m_sortIgnoreFolders = false;
   m_replaceListing = false;
+
+  /* PLEX */
+  m_wasListingCancelled = false;
+  m_displayMessage = false;
+  m_displayMessageTitle = "";
+  m_displayMessageContents = "";
+  /* END PLEX */
 }
 
 CFileItemList::~CFileItemList()
@@ -1620,6 +1740,14 @@ void CFileItemList::Clear()
   m_sortDetails.clear();
   m_replaceListing = false;
   m_content.Empty();
+
+  /* PLEX */
+  m_chainedProviders.clear();
+  m_wasListingCancelled = false;
+  m_displayMessage = false;
+  m_displayMessageTitle = "";
+  m_displayMessageContents = "";
+  /* END PLEX */
 }
 
 void CFileItemList::ClearItems()
@@ -1719,9 +1847,17 @@ void CFileItemList::Assign(const CFileItemList& itemlist, bool append)
   m_content = itemlist.m_content;
   m_mapProperties = itemlist.m_mapProperties;
   m_cacheToDisc = itemlist.m_cacheToDisc;
+
+  /* PLEX */
+  m_wasListingCancelled = itemlist.m_wasListingCancelled;
+  m_displayMessage = itemlist.m_displayMessage;
+  m_displayMessageTitle = itemlist.m_displayMessageTitle;
+  m_displayMessageContents = itemlist.m_displayMessageContents;
+  m_chainedProviders = itemlist.m_chainedProviders;
+  /* END PLEX */
 }
 
-bool CFileItemList::Copy(const CFileItemList& items)
+bool CFileItemList::Copy(const CFileItemList& items, bool copyItems /* = true */)
 {
   // assign all CFileItem parts
   *(CFileItem*)this = *(CFileItem*)&items;
@@ -1736,11 +1872,21 @@ bool CFileItemList::Copy(const CFileItemList& items)
   m_sortOrder      = items.m_sortOrder;
   m_sortIgnoreFolders = items.m_sortIgnoreFolders;
 
-  // make a copy of each item
-  for (int i = 0; i < items.Size(); i++)
+  /* PLEX */
+  m_wasListingCancelled = items.m_wasListingCancelled;
+  m_displayMessage = items.m_displayMessage;
+  m_displayMessageTitle = items.m_displayMessageTitle;
+  m_displayMessageContents = items.m_displayMessageContents;
+  /* END PLEX */
+
+  if (copyItems)
   {
-    CFileItemPtr newItem(new CFileItem(*items[i]));
-    Add(newItem);
+    // make a copy of each item
+    for (int i = 0; i < items.Size(); i++)
+    {
+      CFileItemPtr newItem(new CFileItem(*items[i]));
+      Add(newItem);
+    }
   }
 
   return true;
@@ -2564,6 +2710,8 @@ bool CFileItemList::Load(int windowID)
 
 bool CFileItemList::Save(int windowID)
 {
+
+#ifndef __PLEX__
   int iSize = Size();
   if (iSize <= 0)
     return false;
@@ -2580,6 +2728,7 @@ bool CFileItemList::Save(int windowID)
     file.Close();
     return true;
   }
+#endif
 
   return false;
 }
@@ -2882,6 +3031,10 @@ CStdString CFileItem::GetBaseMoviePath(bool bUseFolderNames) const
 
 CStdString CFileItem::GetLocalFanart() const
 {
+  /* PLEX */
+  return "";
+  /* END PLEX */
+
   if (IsVideoDb())
   {
     if (!HasVideoInfoTag())
@@ -3244,3 +3397,175 @@ int CFileItem::GetVideoContentType() const
   return type;
 }
 
+/* PLEX */
+
+#include "PlexUtils.h"
+
+bool CFileItem::IsPlexMediaServer() const
+{
+  if (HasProperty("plex") && GetProperty("plex").asBoolean())
+    return true;
+  return PlexUtils::IsPlexMediaServer(m_strPath);
+}
+
+bool CFileItem::IsRemoteSharedPlexMediaServerLibrary() const
+{
+  if (IsRemotePlexMediaServerLibrary() &&                                              // It's a remote PMS
+      g_guiSettings.GetString("myplex.token").empty() == false &&                      // We're logged into myPlex
+      m_strPath.find(g_guiSettings.GetString("myplex.token")) == string::npos)  // Our token isn't there
+  {
+    return true;
+  }
+
+  return false;
+}
+
+bool CFileItem::IsRemotePlexMediaServerLibrary() const
+{
+  if (m_strPath.find("library/") != string::npos &&
+      m_strPath.find("X-Plex-Token") != string::npos)
+      return true;
+
+  return false;
+}
+
+bool CFileItem::IsPlexMediaServerLibrary() const
+{
+  if (IsPlexMediaServer() == false)
+    return false;
+
+  if (GetProperty("unprocessed_key").asString().find("/library/parts/") != std::string::npos ||
+      GetProperty("unprocessed_key").asString().find("/library/metadata/") != std::string::npos ||
+      GetProperty("unprocessed_key").asString().find("/library/sections/") != std::string::npos)
+  {
+    return true;
+  }
+
+  return false;
+}
+
+bool CFileItem::IsPlexMediaServerMusic() const
+{
+  bool ret = false;
+
+  if (IsPlexMediaServer() == false)
+  {
+    ret = false;
+  }
+  else
+  {
+    // Look for plex://xxx/music.
+    CStdString str = m_strPath;
+    int firstSlash = str.Find('/');
+    firstSlash = str.Find('/', firstSlash + 2);
+    if (firstSlash > 0)
+    {
+      str = str.substr(firstSlash);
+      if (str.Find("/music/") == 0)
+        ret = true;
+    }
+
+    if (GetProperty("type") == "track")
+      ret = true;
+  }
+
+  return ret;
+}
+
+bool CFileItem::IsPlexWebkit() const
+{
+  return PlexUtils::IsPlexWebKit(m_strPath);
+}
+
+void CFileItem::SetEpisodeData(int total, int watchedCount)
+{
+  SetProperty("watchedepisodes", watchedCount);
+  SetProperty("unwatchedepisodes", total - watchedCount);
+
+  if (total - watchedCount == 1)
+    SetProperty("singularepisodecount", 1);
+  else if (total == 1)
+    SetProperty("singularepisodecount", 1);
+  else
+    ClearProperty("singularepisodecount");
+
+  if (total - watchedCount == 0)
+    SetProperty("zeroepisodecount", 1);
+  else
+    ClearProperty("zeroepisodecount");
+}
+
+bool CFileItemList::IsPlexMediaServerMusic() const
+{
+  if (GetContent() == "track" || GetContent() == "songs")
+    return true;
+
+  return CFileItem::IsPlexMediaServerMusic();
+}
+
+#include "Client/PlexMediaServerClient.h"
+
+//Add Mark a Title as watched
+void CFileItem::MarkAsWatched(bool sendMessage)
+{
+  g_plexApplication.mediaServerClient->SetItemWatched(shared_from_this(), sendMessage);
+
+  // Change the item.
+  SetOverlayImage(CGUIListItem::ICON_OVERLAY_WATCHED);
+  if (GetVideoInfoTag())
+  {
+    GetVideoInfoTag()->m_playCount++;
+    ClearProperty("viewOffset");
+  }
+
+  // Fix numbers.
+  if (HasProperty("watchedepisodes"))
+  {
+    int watched = GetProperty("watchedepisodes").asInteger();
+    int unwatched = GetProperty("unwatchedepisodes").asInteger();
+
+    SetEpisodeData(watched+unwatched, watched+unwatched);
+  }
+
+  g_directoryCache.ClearDirectory(GetPath());
+}
+
+
+void CFileItem::MarkAsUnWatched(bool sendMessage)
+{
+  g_plexApplication.mediaServerClient->SetItemUnWatched(shared_from_this(), sendMessage);
+  SetOverlayImage(CGUIListItem::ICON_OVERLAY_UNWATCHED);
+  if (GetVideoInfoTag())
+  {
+    GetVideoInfoTag()->m_playCount = 0;
+    ClearProperty("viewOffset");
+  }
+
+  // Fix numbers.
+  if (HasProperty("watchedepisodes"))
+  {
+    int watched = GetProperty("watchedepisodes").asInteger();
+    int unwatched = GetProperty("unwatchedepisodes").asInteger();
+
+    SetEpisodeData(watched+unwatched, 0);
+  }
+
+  g_directoryCache.ClearDirectory(GetPath());
+}
+
+void CFileItemList::Insert(int iIndex, CFileItemPtr pItem)
+{
+  CSingleLock lock(m_lock);
+  
+  if (iIndex > m_items.size())
+    m_items.push_back(pItem);
+  else
+    m_items.insert(m_items.begin() + iIndex, pItem);
+
+  if (m_fastLookup)
+  {
+    m_map.insert(MAPFILEITEMSPAIR(pItem->GetPath(), pItem));
+  }
+}
+
+/* END PLEX */

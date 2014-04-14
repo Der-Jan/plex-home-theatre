@@ -40,6 +40,7 @@
 #include "DllPaths_win32.h"
 #include "FileSystem/File.h"
 #include "utils/URIUtils.h"
+#include "powermanagement\PowerManager.h"
 
 // default Broadcom registy bits (setup when installing a CrystalHD card)
 #define BC_REG_PATH       "Software\\Broadcom\\MediaPC"
@@ -264,6 +265,9 @@ bool CWIN32Util::PowerManagement(PowerState State)
     return false;
   }
 
+  // process OnSleep() events. This is called in main thread.
+  g_powerManager.ProcessEvents();
+
   switch (State)
   {
   case POWERSTATE_HIBERNATE:
@@ -456,7 +460,11 @@ CStdString CWIN32Util::GetProfilePath()
   CUtil::GetHomePath(strHomePath);
 
   if(g_application.PlatformDirectoriesEnabled())
+#ifndef __PLEX__
     strProfilePath = URIUtils::AddFileToFolder(GetSpecialFolder(CSIDL_APPDATA|CSIDL_FLAG_CREATE), "XBMC");
+#else
+    strProfilePath = URIUtils::AddFileToFolder(GetSpecialFolder(CSIDL_APPDATA|CSIDL_FLAG_CREATE), PLEX_TARGET_NAME);
+#endif
   else
     strProfilePath = URIUtils::AddFileToFolder(strHomePath , "portable_data");
 
@@ -1521,7 +1529,7 @@ void CWIN32Util::CropSource(CRect& src, CRect& dst, CRect target)
 
 void CWinIdleTimer::StartZero()
 {
-  SetThreadExecutionState(ES_SYSTEM_REQUIRED);
+  SetThreadExecutionState(ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED);
   CStopWatch::StartZero();
 }
 

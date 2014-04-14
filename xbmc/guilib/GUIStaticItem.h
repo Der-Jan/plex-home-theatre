@@ -79,6 +79,12 @@ public:
   bool IsVisible() const;
 
   const CGUIAction &GetClickActions() const { return m_clickActions; };
+
+  /* PLEX */
+  CGUIStaticItem() { m_visCondition = 0; m_visState = true; }
+	void SetClickActions(const CGUIAction& actions) { m_clickActions = actions; }
+  CGUIStaticItem(const CFileItem& item) : CFileItem(item) {}
+  /* END PLEX */
 private:
   typedef std::vector< std::pair<CGUIInfoLabel, CStdString> > InfoVector;
   InfoVector m_info;

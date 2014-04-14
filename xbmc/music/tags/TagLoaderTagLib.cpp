@@ -23,6 +23,7 @@
 
 #include <vector>
 
+#ifndef __PLEX__
 #include <taglib/id3v1tag.h>
 #include <taglib/id3v2tag.h>
 #include <taglib/apetag.h>
@@ -39,6 +40,7 @@
 #undef byte
 #include <taglib/tstring.h>
 #include <taglib/tpropertymap.h>
+#endif
 
 #include "TagLibVFSStream.h"
 #include "MusicInfoTag.h"
@@ -49,9 +51,12 @@
 #include "settings/AdvancedSettings.h"
 
 using namespace std;
+#ifndef __PLEX__
 using namespace TagLib;
+#endif
 using namespace MUSIC_INFO;
 
+#ifndef __PLEX__
 class TagStringHandler : public ID3v2::Latin1StringHandler
 {
 public:
@@ -67,6 +72,7 @@ public:
 };
 
 static const TagStringHandler StringHandler;
+#endif
 
 CTagLoaderTagLib::CTagLoaderTagLib()
 {
@@ -77,6 +83,7 @@ CTagLoaderTagLib::~CTagLoaderTagLib()
   
 }
 
+#ifndef __PLEX__
 static const vector<string> StringListToVectorString(const StringList& stringList)
 {
   vector<string> values;
@@ -84,9 +91,12 @@ static const vector<string> StringListToVectorString(const StringList& stringLis
     values.push_back(it->to8Bit(true));
   return values;
 }
+#endif
 
 bool CTagLoaderTagLib::Load(const string& strFileName, CMusicInfoTag& tag, EmbeddedArt *art /* = NULL */)
 {  
+
+#ifndef __PLEX__
   CStdString strExtension;
   URIUtils::GetExtension(strFileName, strExtension);
   strExtension.ToLower();
@@ -199,6 +209,8 @@ bool CTagLoaderTagLib::Load(const string& strFileName, CMusicInfoTag& tag, Embed
     id3v2 = ttaFile->ID3v2Tag(false);
   else if (wvFile)
     ape = wvFile->APETag(false);
+  else if (mpcFile)
+    ape = mpcFile->APETag(false);
   else    // This is a catch all to get generic information for other files types (s3m, xm, it, mod, etc)
     generic = file->tag();
 
@@ -259,7 +271,7 @@ bool CTagLoaderTagLib::ParseASF(ASF::Tag *asf, EmbeddedArt *art, CMusicInfoTag& 
     else if (it->first == "WM/AlbumArtistSortOrder")     {} // Known unsupported, supress warnings
     else if (it->first == "WM/ArtistSortOrder")          {} // Known unsupported, supress warnings
     else if (it->first == "WM/Script")                   {} // Known unsupported, supress warnings
-    else if (it->first == "WM/Year")                     tag.SetYear(it->second.front().toUInt());
+    else if (it->first == "WM/Year")                     tag.SetYear(atoi(it->second.front().toString().toCString(true)));
     else if (it->first == "MusicBrainz/Artist Id")       tag.SetMusicBrainzArtistID(it->second.front().toString().to8Bit(true));
     else if (it->first == "MusicBrainz/Album Id")        tag.SetMusicBrainzAlbumID(it->second.front().toString().to8Bit(true));
     else if (it->first == "MusicBrainz/Album Artist Id") tag.SetMusicBrainzAlbumArtistID(it->second.front().toString().to8Bit(true));
@@ -281,10 +293,15 @@ bool CTagLoaderTagLib::ParseASF(ASF::Tag *asf, EmbeddedArt *art, CMusicInfoTag& 
     else if (g_advancedSettings.m_logLevel == LOG_LEVEL_MAX)
       CLog::Log(LOGDEBUG, "unrecognized ASF tag name: %s", it->first.toCString(true));
   }
+  // artist may be specified in the ContentDescription block rather than using the 'Author' attribute.
+  if (tag.GetArtist().empty())
+    tag.SetArtist(asf->artist().toCString(true));
   tag.SetLoaded(true);
+#endif
   return true;
 }
 
+#ifndef __PLEX__
 char POPMtoXBMC(int popm)
 {
   // Ratings:
@@ -456,11 +473,11 @@ bool CTagLoaderTagLib::ParseAPETag(APE::Tag *ape, EmbeddedArt *art, CMusicInfoTa
   for (APE::ItemListMap::ConstIterator it = itemListMap.begin(); it != itemListMap.end(); ++it)
   {
     if (it->first == "ARTIST")                         SetArtist(tag, StringListToVectorString(it->second.toStringList()));
-    else if (it->first == "ALBUM ARTIST")              SetAlbumArtist(tag, StringListToVectorString(it->second.toStringList()));
+    else if (it->first == "ALBUM ARTIST" || it->first == "ALBUMARTIST") SetAlbumArtist(tag, StringListToVectorString(it->second.toStringList()));
     else if (it->first == "ALBUM")                     tag.SetAlbum(it->second.toString().to8Bit(true));
     else if (it->first == "TITLE")                     tag.SetTitle(it->second.toString().to8Bit(true));
     else if (it->first == "TRACKNUMBER" || it->first == "TRACK") tag.SetTrackNumber(it->second.toString().toInt());
-    else if (it->first == "DISCNUMBER")                tag.SetPartOfSet(it->second.toString().toInt());
+    else if (it->first == "DISCNUMBER" || it->first == "DISC") tag.SetPartOfSet(it->second.toString().toInt());
     else if (it->first == "YEAR")                      tag.SetYear(it->second.toString().toInt());
     else if (it->first == "GENRE")                     SetGenre(tag, StringListToVectorString(it->second.toStringList()));
     else if (it->first == "COMMENT")                   tag.SetComment(it->second.toString().to8Bit(true));
@@ -686,3 +703,4 @@ void CTagLoaderTagLib::SetGenre(CMusicInfoTag &tag, const vector<string> &values
   else
     tag.SetGenre(genres);
 }
+#endif

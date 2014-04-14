@@ -90,6 +90,17 @@
 #include <vector>
 #include "xbmc/settings/AdvancedSettings.h"
 
+
+/* PLEX */
+#ifdef TARGET_RASPBERRY_PI
+#include "PlexTypes.h"
+#include "guilib/Key.h"
+#endif
+#include "PlexApplication.h"
+#include "AutoUpdate/PlexAutoUpdate.h"
+#include "Utility/PlexGlobalCacher.h"
+/* END PLEX */
+
 using namespace std;
 using namespace XFILE;
 using namespace ADDON;
@@ -106,6 +117,15 @@ typedef struct
 } BUILT_IN;
 
 const BUILT_IN commands[] = {
+  /* PLEX */
+  #if defined(__APPLE__) || defined(_WIN32)
+  { "ToggleDisplayBlanking",      false,  "Toggle display blanking" },
+  #endif
+  { "UpdateAndRestart",           false,  "Update PHT and restart" },
+  { "ControlGlobalCacher",        false,  "Stop or Start the global cacher" },
+  { "MyPlexLogin",                false,  "Launches MyPlex login" },
+  { "CalibrateVideo",             false,  "Calibrate Video" },
+  /* END PLEX */
   { "Help",                       false,  "This help message" },
   { "Reboot",                     false,  "Reboot the system" },
   { "Restart",                    false,  "Restart the system (same as reboot)" },
@@ -290,6 +310,20 @@ int CBuiltins::Execute(const CStdString& execString)
   {
     CApplicationMessenger::Get().Minimize();
   }
+  /* PLEX */
+  else if (execute.Equals("controlglobalcacher"))
+  { //ControlGlobalCacher
+    controlGlobalCache();
+  }
+  else if (execute.Equals("myplexlogin"))
+  {
+    g_windowManager.ActivateWindow(WINDOW_MYPLEX_LOGIN);
+  }
+  else if (execute.Equals("calibratevideo"))
+  {
+    g_windowManager.ActivateWindow(WINDOW_SCREEN_CALIBRATION);
+  }
+  /* PLEX */
   else if (execute.Equals("loadprofile"))
   {
     int index = g_settings.GetProfileIndex(parameter);
@@ -396,11 +430,15 @@ int CBuiltins::Execute(const CStdString& execString)
   else if (execute.Equals("runscript") && params.size())
   {
 #if defined(TARGET_DARWIN_OSX)
+#ifndef __PLEX__
+    if (URIUtils::GetExtension(strParameterCaseIntact) == ".applescript")
+#else
     if (URIUtils::GetExtension(strParameterCaseIntact) == ".applescript" ||
         URIUtils::GetExtension(strParameterCaseIntact) == ".scpt")
     {
+#endif
       CStdString osxPath = CSpecialProtocol::TranslatePath(strParameterCaseIntact);
-      Cocoa_DoAppleScriptFile(osxPath.c_str());
+      ScriptJob::DoScriptJob(ScriptJob::SCRIPT_JOB_APPLE_SCRIPT_FILE, osxPath);
     }
     else
 #endif
@@ -426,7 +464,7 @@ int CBuiltins::Execute(const CStdString& execString)
 #if defined(TARGET_DARWIN_OSX)
   else if (execute.Equals("runapplescript"))
   {
-    Cocoa_DoAppleScript(strParameterCaseIntact.c_str());
+    ScriptJob::DoScriptJob(ScriptJob::SCRIPT_JOB_APPLE_SCRIPT, strParameterCaseIntact.c_str());
   }
 #endif
   else if (execute.Equals("stopscript"))
@@ -598,8 +636,10 @@ int CBuiltins::Execute(const CStdString& execString)
 
     if ( askToResume == true )
     {
+#ifndef __PLEX__
       if ( CGUIWindowVideoBase::ShowResumeMenu(item) == false )
         return false;
+#endif
     }
     if (item.m_bIsFolder)
     {
@@ -988,7 +1028,9 @@ int CBuiltins::Execute(const CStdString& execString)
 
     if( g_alarmClock.IsRunning() )
       g_alarmClock.Stop(params[0],silent);
-
+    // no negative times not allowed, loop must have a positive time
+    if (seconds < 0 || (seconds == 0 && loop))
+      return false;
     g_alarmClock.Start(params[0], seconds, params[1], silent, loop);
   }
   else if (execute.Equals("notification"))
@@ -1637,7 +1679,50 @@ int CBuiltins::Execute(const CStdString& execString)
   {
     g_application.StopPVRManager();
   }
+
+  /* PLEX */
+#if defined(TARGET_DARWIN_OSX) || defined(TARGET_WINDOWS) || defined(OPENELEC)
+  else if (execute.Equals("toggledisplayblanking"))
+  {
+    g_guiSettings.SetBool("videoscreen.blankdisplays", !g_guiSettings.GetBool("videoscreen.blankdisplays"));
+    g_graphicsContext.UpdateDisplayBlanking();
+    //g_graphicsContext.SetVideoResolution(g_graphicsContext.GetVideoResolution(), true);
+  }
+  else if (execute.Equals("updateandrestart"))
+  {
+#ifdef ENABLE_AUTOUPDATE
+    g_plexApplication.autoUpdater->UpdateAndRestart();
+#endif
+  }
+  else if (execute.Equals("togglewatched"))
+  {
+    g_application.OnAction(CAction(ACTION_TOGGLE_WATCHED));
+  }
+#endif
+  /* PLEX */
   else
     return -1;
   return 0;
 }
+
+/* PLEX */
+
+bool ScriptJob::DoWork()
+{
+#if TARGET_DARWIN_OSX
+  if (m_type == SCRIPT_JOB_APPLE_SCRIPT)
+    Cocoa_DoAppleScript(m_scriptData.c_str());
+  else if (m_type == SCRIPT_JOB_APPLE_SCRIPT_FILE)
+    Cocoa_DoAppleScriptFile(m_scriptData.c_str());
+#endif
+
+  return true;
+}
+
+void ScriptJob::DoScriptJob(ScriptJobType type, const CStdString &scriptData)
+{
+  ScriptJob* job = new ScriptJob(type, scriptData);
+  CJobManager::GetInstance().AddJob(job, NULL);
+}
+
+/* END PLEX */

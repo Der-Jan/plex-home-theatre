@@ -96,6 +96,10 @@
 #include "URL.h"
 #include "utils/log.h"
 
+/* PLEX */
+#include "plex/FileSystem/PlexFile.h"
+/* END PLEX */
+
 using namespace XFILE;
 
 CFileFactory::CFileFactory()
@@ -112,6 +116,7 @@ IFile* CFileFactory::CreateLoader(const CStdString& strFileName)
   return CreateLoader(url);
 }
 
+#ifndef __PLEX__
 IFile* CFileFactory::CreateLoader(const CURL& url)
 {
   CStdString strProtocol = url.GetProtocol();
@@ -159,7 +164,9 @@ IFile* CFileFactory::CreateLoader(const CURL& url)
     else if (strProtocol == "lastfm") return new CLastFMFile();
     else if (strProtocol == "tuxbox") return new CTuxBoxFile();
     else if (strProtocol == "hdhomerun") return new CHomeRunFile();
+#ifndef __PLEX__
     else if (strProtocol == "sling") return new CSlingboxFile();
+#endif
     else if (strProtocol == "myth") return new CMythFile();
     else if (strProtocol == "cmyth") return new CMythFile();
 #ifdef HAS_FILESYSTEM_SMB
@@ -204,3 +211,39 @@ IFile* CFileFactory::CreateLoader(const CURL& url)
   CLog::Log(LOGWARNING, "%s - Unsupported protocol(%s) in %s", __FUNCTION__, strProtocol.c_str(), url.Get().c_str() );
   return NULL;
 }
+#else
+IFile* CFileFactory::CreateLoader(const CURL& url)
+{
+  CStdString strProtocol = url.GetProtocol();
+  strProtocol.MakeLower();
+
+  if (strProtocol == "zip") return new CZipFile();
+  else if (strProtocol == "file" || strProtocol.IsEmpty()) return new CHDFile();
+  else if (strProtocol == "special") return new CSpecialProtocolFile();
+  else if (strProtocol == "filereader") return new CFileReaderFile();
+#if defined(HAS_FILESYSTEM_CDDA) && defined(HAS_DVD_DRIVE)
+  else if (strProtocol == "cdda") return new CFileCDDA();
+#endif
+#ifdef HAS_FILESYSTEM
+  else if (strProtocol == "iso9660") return new CISOFile();
+#endif
+  else if(strProtocol == "udf") return new CUDFFile();
+
+
+  if( g_application.getNetwork().IsAvailable() )
+  {
+    if (strProtocol == "plexserver") return new CPlexFile();
+    else if (strProtocol == "http" ||  strProtocol == "https") return new CCurlFile();
+    else if (strProtocol == "shout") return new CShoutcastFile();
+    else if (strProtocol == "pipe") return new CPipeFile();
+#ifdef HAS_UPNP
+    else if (strProtocol == "upnp") return new CUPnPFile();
+#endif
+
+  }
+
+  CLog::Log(LOGWARNING, "%s - Unsupported protocol(%s) in %s", __FUNCTION__, strProtocol.c_str(), url.Get().c_str() );
+
+  return NULL;
+}
+#endif

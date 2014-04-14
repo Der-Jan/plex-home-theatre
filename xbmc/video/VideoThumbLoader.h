@@ -19,6 +19,12 @@
  *
  */
 
+
+#ifdef __PLEX__
+#include "plex/Owned/VideoThumbLoader.h"
+
+#else
+
 #include <map>
 #include "ThumbLoader.h"
 #include "utils/JobManager.h"
@@ -132,3 +138,5 @@ protected:
   typedef std::map<int, std::map<std::string, std::string> > ArtCache;
   ArtCache m_showArt;
 };
+
+#endif

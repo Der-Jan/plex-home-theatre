@@ -208,7 +208,8 @@ public:
    \param label2 Second label to check
    */
   static bool CheckAndCorrectOverlap(CGUILabel &label1, CGUILabel &label2);
-  
+
+
 protected:
   color_t GetColor() const;
   

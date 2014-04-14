@@ -22,7 +22,11 @@
 #include "GUIListItemLayout.h"
 #include "utils/Archive.h"
 #include "utils/CharsetConverter.h"
-#include "utils/Variant.h"
+
+
+/* PLEX */
+#include "boost/format.hpp"
+/* END PLEX */
 
 using namespace std;
 
@@ -209,6 +213,10 @@ CStdString CGUIListItem::GetOverlayImage() const
     return "OverlayWatched.png";
   case ICON_OVERLAY_HD:
     return "OverlayHD.png";
+  /* PLEX */
+  case ICON_OVERLAY_IN_PROGRESS:
+    return "OverlayInProgress.png";
+  /* END PLEX */
   default:
     return "";
   }
@@ -247,6 +255,7 @@ const CGUIListItem& CGUIListItem::operator =(const CGUIListItem& item)
   m_bIsFolder = item.m_bIsFolder;
   m_mapProperties = item.m_mapProperties;
   m_art = item.m_art;
+
   m_artFallbacks = item.m_artFallbacks;
   SetInvalid();
   return *this;
@@ -392,6 +401,7 @@ void CGUIListItem::SetInvalid()
   if (m_focusedLayout) m_focusedLayout->SetInvalid();
 }
 
+#ifndef __PLEX__
 void CGUIListItem::SetProperty(const CStdString &strKey, const CVariant &value)
 {
   m_mapProperties[strKey] = value;
@@ -414,9 +424,21 @@ bool CGUIListItem::HasProperty(const CStdString &strKey) const
 
   return true;
 }
+#endif
 
 void CGUIListItem::ClearProperty(const CStdString &strKey)
 {
+  /* PLEX */
+  CStdString _key(strKey);
+  _key.ToLower();
+
+  PropertyMap::iterator _iter = m_mapProperties.find(_key);
+  if (_iter != m_mapProperties.end())
+    m_mapProperties.erase(_iter);
+
+  return;
+  /* END PLEX */
+
   PropertyMap::iterator iter = m_mapProperties.find(strKey);
   if (iter != m_mapProperties.end())
     m_mapProperties.erase(iter);
@@ -446,3 +468,37 @@ void CGUIListItem::AppendProperties(const CGUIListItem &item)
   for (PropertyMap::const_iterator i = item.m_mapProperties.begin(); i != item.m_mapProperties.end(); ++i)
     SetProperty(i->first, i->second);
 }
+
+/* PLEX */
+bool CGUIListItem::HasArt(const string &type, int index) const
+{
+  return !GetArt(type, index).empty();
+}
+
+std::string CGUIListItem::GetArt(const string &type, int index) const
+{
+  if (index == 0)
+    return GetArt(type);
+
+  std::string typeNum = (boost::format("%s____%d") % type % index).str();
+  return GetArt(typeNum);
+}
+
+void CGUIListItem::SetArt(const string &type, int index, const string &url)
+{
+  if (index == 0)
+    SetArt(type, url);
+  else
+  {
+    std::string typeNum = (boost::format("%s____%d") % type % index).str();
+    SetArt(typeNum, url);
+  }
+}
+
+void CGUIListItem::RemoveArt(const string &type)
+{
+  if (HasArt(type))
+    m_art.erase(type);
+}
+
+/* END PLEX */

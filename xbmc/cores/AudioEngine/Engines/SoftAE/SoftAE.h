@@ -116,6 +116,7 @@ private:
   void OpenSink();
 
   void InternalOpenSink();
+  void InternalCloseSink();
   void ResetEncoder();
   bool SetupEncoder(AEAudioFormat &format);
   void Deinitialize();
@@ -136,11 +137,13 @@ private:
 
   /* internal vars */
   bool             m_running, m_reOpen;
+  bool             m_sinkIsSuspended; /* The sink is in unusable state, e.g. SoftSuspended */
   bool             m_isSuspended;      /* engine suspended by external function to release audio context */
   bool             m_softSuspend;      /* latches after last stream or sound played for timer below for idle */
   unsigned int     m_softSuspendTimer; /* time in milliseconds to hold sink open before soft suspend for idle */
   CEvent           m_reOpenEvent;
   CEvent           m_wake;
+  CEvent           m_saveSuspend;
 
   CCriticalSection m_runningLock;     /* released when the thread exits */
   CCriticalSection m_streamLock;      /* m_streams lock */
@@ -154,19 +157,18 @@ private:
   bool                m_muted;
   CAEChannelInfo      m_chLayout;
   unsigned int        m_frameSize;
+  double              m_frameSizeMul;
 
   /* the sink, its format information, and conversion function */
   AESinkInfoList            m_sinkInfoList;
   IAESink                  *m_sink;
   AEAudioFormat             m_sinkFormat;
   double                    m_sinkFormatSampleRateMul;
-  double                    m_sinkFormatFrameSizeMul;
   unsigned int              m_sinkBlockSize;
   bool                      m_sinkHandlesVolume;
   AEAudioFormat             m_encoderFormat;
   double                    m_encoderFrameSizeMul;
   double                    m_encoderInitSampleRateMul;
-  double                    m_encoderInitFrameSizeMul;
   unsigned int              m_bytesPerSample;
   CAEConvert::AEConvertFrFn m_convertFn;
 
@@ -242,5 +244,6 @@ private:
   void         RunNormalizeStage (unsigned int channelCount, void *out, unsigned int mixed);
 
   void         RemoveStream(StreamList &streams, CSoftAEStream *stream);
+  void         PrintSinks();
 };
 

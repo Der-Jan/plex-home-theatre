@@ -69,7 +69,7 @@ static uint16_t SymMappingsEvdev[][2] =
 , { 138, 0x69 /* 'i' */}             // Info
 , { 147, 0x6d /* 'm' */}             // Menu
 , { 148, XBMCK_LAUNCH_APP2 }         // Launch app 2
-, { 150, 0x9f }                      // Sleep
+, { 150, XBMCK_SLEEP }               // Sleep
 , { 152, XBMCK_LAUNCH_APP1 }         // Launch app 1
 , { 163, XBMCK_LAUNCH_MAIL }         // Launch Mail
 , { 164, XBMCK_BROWSER_FAVORITES }   // Browser favorites
@@ -383,7 +383,7 @@ bool CWinEventsSDL::MessagePump()
         g_windowManager.MarkDirty();
         break;
     }
-    memset(&event, 0, sizeof(XBMC_Event));
+    memset(&event, 0, sizeof(SDL_Event));
   }
 
   return ret;
@@ -415,6 +415,11 @@ bool CWinEventsSDL::ProcessOSXShortcuts(SDL_Event& event)
       return true;
 
     case SDLK_h: // CMD-h to hide (but we minimize for now)
+        /* PLEX */
+        CApplicationMessenger::Get().Hide();
+        return true;
+        /* END PLEX */
+
     case SDLK_m: // CMD-m to minimize
       CApplicationMessenger::Get().Minimize();
       return true;

@@ -23,6 +23,10 @@
 #include "utils/RingBuffer.h"
 #include <map>
 #include "utils/HttpHeader.h"
+/* PLEX */
+#include "log.h"
+#include <sys/socket.h>
+/* END PLEX */
 
 namespace XCURL
 {
@@ -83,6 +87,14 @@ namespace XFILE
       static bool GetHttpHeader(const CURL &url, CHttpHeader &headers);
       static bool GetMimeType(const CURL &url, CStdString &content, CStdString useragent="");
 
+      /* PLEX */
+      bool Put(const CStdString& strURL, CStdString& strHTML);
+      bool Delete(const CStdString& strURL, CStdString& strHTML);
+      void ClearCookies() { m_clearCookies = true; }
+      long GetLastHTTPResponseCode() const { return m_httpresponse; }
+      bool DidCancel() const { return m_state->m_cancelled; }
+      /* END PLEX */
+
       class CReadState
       {
       public:
@@ -101,6 +113,7 @@ namespace XFILE
           int64_t         m_fileSize;
           int64_t         m_filePos;
           bool            m_bFirstLoop;
+          bool            m_sendRange;
 
           /* returned http header */
           CHttpHeader m_httpheader;
@@ -114,8 +127,30 @@ namespace XFILE
           bool         ReadString(char *szLine, int iLineLength);
           bool         FillBuffer(unsigned int want);
 
+          void         SetResume(void);
           long         Connect(unsigned int size);
           void         Disconnect();
+
+          /* PLEX */
+          CStdString    m_strDeadEndUrl; // If we can't redirect, this holds the last URL.
+          SOCKET        m_ticklePipe[2];
+          std::string   m_url; // this is the URL that we are fetching, mostly for debug purpose.
+          bool          m_hasTicklePipe;
+
+          void Cancel()
+          {
+            if (m_hasTicklePipe)
+            {
+#ifndef TARGET_WINDOWS
+              if (::write(m_ticklePipe[1], "Q", 1) != 1)
+#else
+              if (::send(m_ticklePipe[1], "Q", 1, 0) != 1)
+#endif
+                CLog::Log(LOGWARNING, "CCurlFile::ReadState::Cancel ERROR sending wakeup packet. %d", errno);
+            }
+            m_cancelled = true;
+          }
+          /* END PLEX */
       };
 
     protected:
@@ -167,6 +202,11 @@ namespace XFILE
       MAPHTTPHEADERS m_requestheaders;
 
       long            m_httpresponse;
+
+      /* PLEX */
+      CStdString      m_verb;
+      bool            m_clearCookies;
+      /* END PLEX */
   };
 }
 

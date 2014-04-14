@@ -7,6 +7,14 @@
 #include "pvr/PVRManager.h"
 #include "pvr/recordings/PVRRecordings.h"
 
+/* PLEX */
+#include "Client/PlexMediaServerClient.h"
+#include "Client/PlexTimelineManager.h"
+#include "Remote/PlexRemoteSubscriberManager.h"
+#include <boost/make_shared.hpp>
+#include "PlexApplication.h"
+/* END PLEX */
+
 class CSaveFileStateJob : public CJob
 {
   CFileItem m_item;
@@ -32,7 +40,7 @@ bool CSaveFileStateJob::DoWork()
   if (m_item.HasVideoInfoTag() && m_item.GetVideoInfoTag()->m_strFileNameAndPath.Find("removable://") == 0)
     progressTrackingFile = m_item.GetVideoInfoTag()->m_strFileNameAndPath; // this variable contains removable:// suffixed by disc label+uniqueid or is empty if label not uniquely identified
   else if (m_item.HasProperty("original_listitem_url") && 
-      URIUtils::IsPlugin(m_item.GetProperty("original_listitem_url").asString()))
+      (URIUtils::IsPlugin(m_item.GetProperty("original_listitem_url").asString()) || URIUtils::IsBluray(m_item.GetPath()) ) )
     progressTrackingFile = m_item.GetProperty("original_listitem_url").asString();
 
   if (progressTrackingFile != "")
@@ -41,12 +49,14 @@ bool CSaveFileStateJob::DoWork()
     {
       CLog::Log(LOGDEBUG, "%s - Saving file state for video item %s", __FUNCTION__, progressTrackingFile.c_str());
 
+#ifndef __PLEX__
       CVideoDatabase videodatabase;
       if (!videodatabase.Open())
       {
         CLog::Log(LOGWARNING, "%s - Unable to open video database. Can not save file state!", __FUNCTION__);
       }
       else
+#endif
       {
         bool updateListing = false;
         // No resume & watched status for livetv
@@ -57,7 +67,9 @@ bool CSaveFileStateJob::DoWork()
             CLog::Log(LOGDEBUG, "%s - Marking video item %s as watched", __FUNCTION__, progressTrackingFile.c_str());
 
             // consider this item as played
+#ifndef __PLEX__
             videodatabase.IncrementPlayCount(m_item);
+#endif
             m_item.GetVideoInfoTag()->m_playCount++;
 
             // PVR: Set recording's play count on the backend (if supported)
@@ -66,16 +78,35 @@ bool CSaveFileStateJob::DoWork()
 
             m_item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_UNWATCHED, true);
             updateListing = true;
+            /* PLEX */
+            CFileItemPtr item = boost::make_shared<CFileItem>(m_item);
+            g_plexApplication.mediaServerClient->SetItemWatched(item);
+            g_plexApplication.timelineManager->ReportProgress(item, PLEX_MEDIA_STATE_STOPPED);
+            /* END PLEX */
           }
+#ifndef __PLEX__
           else
             videodatabase.UpdateLastPlayed(m_item);
+#endif
 
           if (!m_item.HasVideoInfoTag() || m_item.GetVideoInfoTag()->m_resumePoint.timeInSeconds != m_bookmark.timeInSeconds)
           {
+#ifndef __PLEX__
             if (m_bookmark.timeInSeconds <= 0.0f)
               videodatabase.ClearBookMarksOfFile(progressTrackingFile, CBookmark::RESUME);
             else
               videodatabase.AddBookMarkToFile(progressTrackingFile, m_bookmark, CBookmark::RESUME);
+#else
+            if (m_bookmark.timeInSeconds < 0.0f)
+            {
+              g_plexApplication.timelineManager->ReportProgress(boost::make_shared<CFileItem>(m_item), PLEX_MEDIA_STATE_STOPPED);
+            }
+            else if (m_bookmark.timeInSeconds > 0.0f)
+            {
+              g_plexApplication.timelineManager->ReportProgress(boost::make_shared<CFileItem>(m_item), PLEX_MEDIA_STATE_STOPPED, m_bookmark.timeInSeconds*1000);
+              m_item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_IN_PROGRESS);
+            }
+#endif
             if (m_item.HasVideoInfoTag())
               m_item.GetVideoInfoTag()->m_resumePoint = m_bookmark;
 
@@ -93,17 +124,24 @@ bool CSaveFileStateJob::DoWork()
 
         if (g_settings.m_currentVideoSettings != g_settings.m_defaultVideoSettings)
         {
+#ifndef __PLEX__
           videodatabase.SetVideoSettings(progressTrackingFile, g_settings.m_currentVideoSettings);
+#endif
         }
 
-        if ((m_item.IsDVDImage() ||
-             m_item.IsDVDFile()    ) &&
-             m_item.HasVideoInfoTag() &&
-             m_item.GetVideoInfoTag()->HasStreamDetails())
+#ifndef __PLEX__
+        if (m_item.HasVideoInfoTag() && m_item.GetVideoInfoTag()->HasStreamDetails())
         {
-          videodatabase.SetStreamDetailsForFile(m_item.GetVideoInfoTag()->m_streamDetails,progressTrackingFile);
-          updateListing = true;
+          CFileItem dbItem(m_item);
+          videodatabase.GetStreamDetails(dbItem); // Fetch stream details from the db (if any)
+          // Check whether the item's db streamdetails need updating
+          if (!videodatabase.GetStreamDetails(dbItem) || dbItem.GetVideoInfoTag()->m_streamDetails != m_item.GetVideoInfoTag()->m_streamDetails)
+          {
+            videodatabase.SetStreamDetailsForFile(m_item.GetVideoInfoTag()->m_streamDetails, progressTrackingFile);
+            updateListing = true;
+          }
         }
+        
         // in order to properly update the the list, we need to update the stack item which is held in g_application.m_stackFileItemToUpdate
         if (m_item.HasProperty("stackFileItemToUpdate"))
         {
@@ -111,6 +149,7 @@ bool CSaveFileStateJob::DoWork()
           videodatabase.GetResumePoint(*m_item.GetVideoInfoTag());
         }
         videodatabase.Close();
+#endif
 
         if (updateListing)
         {

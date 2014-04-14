@@ -365,6 +365,36 @@ class CAdvancedSettings
     bool m_initialized;
 
     void SetDebugMode(bool debug);
+
+    /* PLEX */
+    CStdString m_language;
+    CStdString m_units;
+
+    int m_secondsToVisualizer;
+    bool m_bVisualizerOnPlay;
+    int m_nowPlayingFlipTime;
+    bool m_bBackgroundMusicOnlyWhenFocused;
+    bool m_bAutoShuffle;
+    bool m_bUseAnamorphicZoom;
+    bool m_bEnableViewRestrictions;
+    bool m_bEnableKeyboardBacklightControl;
+    bool m_bEnablePlexTokensInLogs;
+    bool m_bCollapseSingleSeason;
+
+    unsigned int m_smartCacheUpperLimit;
+    int m_iShowFirstRun;
+    bool m_bEnableGDM;
+    unsigned int m_cacheReadRate;
+
+    bool m_bAlwaysReinitCoreAudio;
+    bool m_bHideFanouts;
+    bool m_bForceJpegImageFormat;
+
+    void SetVisualizeDirtyRegions(bool visualize);
+    void SetDirtyRegionsAlgorithm(int algorithm);
+    void SetDirtyRegionsNoFlipTimeout(int timeout);
+    bool m_bUseMatroskaTranscodes;
+    /* END PLEX */
 };
 
 XBMC_GLOBAL(CAdvancedSettings,g_advancedSettings);

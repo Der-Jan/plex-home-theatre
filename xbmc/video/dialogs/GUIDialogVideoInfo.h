@@ -31,6 +31,7 @@ public:
   virtual ~CGUIDialogVideoInfo(void);
   virtual bool OnMessage(CGUIMessage& message);
   virtual bool OnAction(const CAction &action);
+
   void SetMovie(const CFileItem *item);
   bool NeedRefresh() const;
   bool RefreshAll() const;
@@ -41,7 +42,11 @@ public:
   const CFileItemList& CurrentDirectory() const { return *m_castList; };
   virtual bool HasListItems() const { return true; };
 
+#ifndef __PLEX__
   static std::string ChooseArtType(const CFileItem &item, std::map<std::string, std::string> &currentArt);
+#else
+  std::string ChooseArtType(const CFileItem &item, std::map<std::string, std::string> &currentArt);
+#endif
   static void AddItemPathToFileBrowserSources(VECSOURCES &sources, const CFileItem &item);
 protected:
   virtual void OnInitWindow();
@@ -64,4 +69,10 @@ protected:
   bool m_bRefresh;
   bool m_bRefreshAll;
   bool m_hasUpdatedThumb;
+
+  /* PLEX */
+  std::string OnGetMedia(const std::string& mediaType, const std::string& currentCachedMedia, int label);
+  //bool AsyncDownloadMedia(const std::string& remoteFile, const std::string& localFile);
+  std::map<std::string, std::string> m_mediaMap;
+  /* END PLEX */
 };

@@ -20,6 +20,10 @@
  *
  */
 
+#ifdef __PLEX__
+#include "plex/Home/GUIWindowHome.h"
+#else
+
 #include "guilib/GUIWindow.h"
 #include "interfaces/IAnnouncer.h"
 #include "utils/Job.h"
@@ -47,3 +51,4 @@ private:
   int m_cumulativeUpdateFlag;
   bool m_dbUpdating;
 };
+#endif
