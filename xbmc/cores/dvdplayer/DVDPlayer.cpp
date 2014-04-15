@@ -4119,23 +4119,11 @@ void CDVDPlayer::UpdatePlayState(double timeout)
     state.time_total  = m_Edl.RemoveCutTime(llrint(state.time_total));
   }
 
-<<<<<<< HEAD
-  state.player_state = "";
-  if (m_pInputStream && m_pInputStream->IsStreamType(DVDSTREAM_TYPE_DVD))
-  {
-    if(!((CDVDInputStreamNavigator*)m_pInputStream)->GetNavigatorState(state.player_state))
-      state.player_state = "";
-  }
-
-  if (state.time_src == ETIMESOURCE_CLOCK)
-    state.time_offset = 0;
-=======
   if(state.time_total <= 0)
     state.canseek  = false;
 
   if (state.time_src == ETIMESOURCE_CLOCK)
     state.time_offset = m_offset_pts;
->>>>>>> ionplex-dev
   else
     state.time_offset = DVD_MSEC_TO_TIME(state.time) - state.dts;
 
